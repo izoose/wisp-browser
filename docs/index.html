@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wisp — a lightweight, dark browser for Windows</title>
+<meta name="description" content="Chromium power, a wisp of the memory. A quiet, dark browser for Windows that puts idle tabs to sleep — the same 8 tabs use ~73% less RAM than Brave and ~85% less than Chrome.">
+<meta name="theme-color" content="#0A0D14">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230A0D14'/%3E%3Cpath d='M4 19c3.5 0 4.5-9 8-9s3.5 9 7 9 5-6 8.5-6' stroke='%236BB0FF' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3Cpath d='M4 24c3.5 0 4.5-6 8-6s3.5 6 7 6 5-4 8.5-4' stroke='%234C8DFF' stroke-width='2.2' fill='none' stroke-linecap='round' opacity='.55'/%3E%3C/svg%3E">
+<meta property="og:title" content="Wisp — a lightweight, dark browser for Windows">
+<meta property="og:description" content="Chromium power, a wisp of the memory. Idle tabs sleep, so a pile of tabs stops eating your RAM.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://izoose.github.io/wisp-browser/">
+<meta property="og:image" content="https://raw.githubusercontent.com/izoose/wisp-browser/main/wisp-logo-transparent.png">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+  :root{
+    --bg:#0A0D14; --bg2:#0C1018; --surface:#121824; --surface2:#161E2C;
+    --line:#1E2635; --line2:#283245;
+    --text:#E7EBF3; --dim:#8B95A9; --faint:#59637A;
+    --accent:#4C8DFF; --accent-soft:#6BB0FF; --accent-deep:#2F6BE0;
+    --sans:"Segoe UI Variable Display","Segoe UI",system-ui,-apple-system,"Helvetica Neue",sans-serif;
+    --sans-text:"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,sans-serif;
+    --mono:"Cascadia Code","Cascadia Mono",ui-monospace,Consolas,"SFMono-Regular",monospace;
+    --maxw:1080px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--bg);color:var(--text);font-family:var(--sans-text);line-height:1.65;
+    -webkit-font-smoothing:antialiased;overflow-x:hidden;font-size:17px}
+  a{color:inherit;text-decoration:none}
+  ::selection{background:rgba(76,141,255,.28)}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:6px}
+
+  .glow{position:fixed;inset:0;z-index:-1;overflow:hidden;pointer-events:none}
+  .glow b{position:absolute;border-radius:50%;filter:blur(70px);opacity:.5;display:block}
+  .g1{width:52vw;height:52vw;left:-8vw;top:-14vw;background:radial-gradient(circle at 50% 50%,rgba(76,141,255,.42),transparent 66%);animation:drift1 26s ease-in-out infinite}
+  .g2{width:44vw;height:44vw;right:-10vw;top:8vw;background:radial-gradient(circle at 50% 50%,rgba(47,107,224,.34),transparent 66%);animation:drift2 32s ease-in-out infinite}
+  .g3{width:60vw;height:60vw;left:20vw;top:44vw;background:radial-gradient(circle at 50% 50%,rgba(107,176,255,.16),transparent 68%);animation:drift1 40s ease-in-out infinite reverse}
+  @keyframes drift1{0%,100%{transform:translate(0,0)}50%{transform:translate(6vw,4vw)}}
+  @keyframes drift2{0%,100%{transform:translate(0,0)}50%{transform:translate(-5vw,5vw)}}
+
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 28px}
+  .eyebrow{font-family:var(--mono);font-size:.72rem;letter-spacing:.22em;text-transform:uppercase;color:var(--accent-soft);opacity:.85}
+
+  nav{position:sticky;top:0;z-index:20;backdrop-filter:blur(14px);background:linear-gradient(180deg,rgba(10,13,20,.86),rgba(10,13,20,.55));border-bottom:1px solid transparent;transition:border-color .3s}
+  nav.stuck{border-bottom-color:var(--line)}
+  .nav{display:flex;align-items:center;justify-content:space-between;height:66px}
+  .brand{display:flex;align-items:center;gap:11px;font-family:var(--sans);font-weight:600;font-size:1.15rem;letter-spacing:-.01em}
+  .mark{width:26px;height:26px;flex:none}
+  .nav-links{display:flex;align-items:center;gap:30px}
+  .nav-links a{color:var(--dim);font-size:.95rem;transition:color .2s}
+  .nav-links a:hover{color:var(--text)}
+  .btn{display:inline-flex;align-items:center;gap:9px;font-family:var(--sans);font-weight:600;border-radius:11px;padding:11px 20px;font-size:.96rem;cursor:pointer;transition:.2s;border:1px solid transparent;white-space:nowrap}
+  .btn-primary{background:linear-gradient(180deg,var(--accent-soft),var(--accent));color:#04070E;box-shadow:0 10px 30px -10px rgba(76,141,255,.7),inset 0 1px 0 rgba(255,255,255,.35)}
+  .btn-primary:hover{transform:translateY(-2px);box-shadow:0 16px 40px -12px rgba(76,141,255,.85),inset 0 1px 0 rgba(255,255,255,.35)}
+  .btn-ghost{border-color:var(--line2);color:var(--text);background:rgba(255,255,255,.02)}
+  .btn-ghost:hover{border-color:var(--accent);background:rgba(76,141,255,.08)}
+  @media(max-width:640px){.nav-links a:not(.btn){display:none}}
+
+  .hero{text-align:center;padding:112px 0 96px}
+  .badge{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:.76rem;letter-spacing:.04em;color:var(--dim);border:1px solid var(--line);border-radius:999px;padding:6px 14px;margin-bottom:34px;background:rgba(255,255,255,.02)}
+  .badge .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px var(--accent)}
+  .wordmark{font-family:var(--sans);font-weight:300;letter-spacing:-.045em;line-height:.9;font-size:clamp(4.4rem,15vw,10rem);margin-bottom:8px}
+  .wordmark b{font-weight:300;color:var(--accent);text-shadow:0 0 44px rgba(76,141,255,.7)}
+  .lede{font-family:var(--sans);font-weight:300;font-size:clamp(1.35rem,3.4vw,2rem);letter-spacing:-.01em;line-height:1.3;max-width:20ch;margin:0 auto 14px;text-wrap:balance}
+  .sub{color:var(--dim);font-size:1.12rem;max-width:52ch;margin:0 auto 40px;text-wrap:balance}
+  .cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-bottom:22px}
+  .cta .btn{padding:14px 26px;font-size:1.02rem}
+  .fine{color:var(--faint);font-size:.85rem;font-family:var(--mono);letter-spacing:.02em}
+
+  .band{padding:96px 0;border-top:1px solid var(--line)}
+  .head{max-width:56ch;margin-bottom:52px}
+  .head h2{font-family:var(--sans);font-weight:600;letter-spacing:-.022em;font-size:clamp(1.9rem,4.2vw,3rem);line-height:1.08;margin:14px 0 16px;text-wrap:balance}
+  .head p{color:var(--dim);font-size:1.12rem;max-width:52ch}
+
+  .chart{background:linear-gradient(180deg,var(--surface),var(--bg2));border:1px solid var(--line);border-radius:20px;padding:38px clamp(22px,4vw,46px)}
+  .bar{display:grid;grid-template-columns:88px 1fr auto;align-items:center;gap:18px;padding:16px 0}
+  .bar + .bar{border-top:1px solid var(--line)}
+  .bar .name{font-family:var(--sans);font-weight:600;font-size:1.05rem}
+  .bar .name small{display:block;font-family:var(--sans-text);font-weight:400;color:var(--faint);font-size:.76rem;margin-top:1px}
+  .track{height:26px;border-radius:8px;background:rgba(255,255,255,.035);overflow:hidden;position:relative}
+  .fill{height:100%;width:0;border-radius:8px;transition:width 1.4s cubic-bezier(.16,1,.3,1)}
+  .in .fill{width:var(--w)}
+  .fill.me{background:linear-gradient(90deg,var(--accent-deep),var(--accent-soft));box-shadow:0 0 26px -2px rgba(76,141,255,.75)}
+  .fill.them{background:linear-gradient(90deg,#2A3242,#3C475E)}
+  .val{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:1.02rem;color:var(--dim);min-width:92px;text-align:right}
+  .bar.me .val{color:var(--accent-soft)}
+  .chart-note{margin-top:22px;color:var(--faint);font-size:.9rem;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .chart-note a{color:var(--accent-soft);border-bottom:1px solid transparent}
+  .chart-note a:hover{border-bottom-color:var(--accent-soft)}
+
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+  @media(max-width:860px){.grid{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:560px){.grid{grid-template-columns:1fr}}
+  .card{background:linear-gradient(180deg,var(--surface),var(--bg2));border:1px solid var(--line);border-radius:16px;padding:26px 24px;transition:.25s}
+  .card:hover{border-color:var(--line2);transform:translateY(-3px)}
+  .card .ic{width:40px;height:40px;border-radius:11px;display:grid;place-items:center;margin-bottom:16px;background:rgba(76,141,255,.1);border:1px solid rgba(76,141,255,.2)}
+  .card .ic svg{width:20px;height:20px;stroke:var(--accent-soft);fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  .card h3{font-family:var(--sans);font-weight:600;font-size:1.12rem;letter-spacing:-.01em;margin-bottom:7px}
+  .card p{color:var(--dim);font-size:.97rem}
+
+  .strip{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--line);border-radius:18px;overflow:hidden;background:var(--surface)}
+  @media(max-width:720px){.strip{grid-template-columns:1fr}}
+  .step{padding:32px 28px}
+  .step + .step{border-left:1px solid var(--line)}
+  @media(max-width:720px){.step + .step{border-left:0;border-top:1px solid var(--line)}}
+  .step .n{font-family:var(--mono);color:var(--accent-soft);font-size:.8rem;letter-spacing:.1em;margin-bottom:12px}
+  .step h4{font-family:var(--sans);font-weight:600;font-size:1.08rem;margin-bottom:6px}
+  .step p{color:var(--dim);font-size:.96rem}
+
+  .final{text-align:center;padding:104px 0}
+  .final h2{font-family:var(--sans);font-weight:300;letter-spacing:-.03em;font-size:clamp(2.4rem,6vw,4.2rem);line-height:1;margin-bottom:20px;text-wrap:balance}
+  .final h2 b{font-weight:300;color:var(--accent);text-shadow:0 0 40px rgba(76,141,255,.6)}
+  .final p{color:var(--dim);font-size:1.15rem;margin-bottom:34px;max-width:44ch;margin-inline:auto}
+
+  footer{border-top:1px solid var(--line);padding:40px 0 56px;color:var(--faint);font-size:.9rem}
+  .foot{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;align-items:center}
+  .foot a{color:var(--dim)}.foot a:hover{color:var(--text)}
+  .foot .links{display:flex;gap:24px}
+
+  .rise{opacity:0;transform:translateY(22px);transition:opacity .8s ease,transform .8s cubic-bezier(.16,1,.3,1)}
+  .rise.show{opacity:1;transform:none}
+  @media(prefers-reduced-motion:reduce){*{animation:none!important}html{scroll-behavior:auto}.rise{opacity:1;transform:none;transition:none}.fill{transition:none}}
+</style>
+</head>
+<body>
+<div class="glow"><b class="g1"></b><b class="g2"></b><b class="g3"></b></div>
+
+<nav id="nav"><div class="wrap nav">
+  <a class="brand" href="#top">
+    <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+      <path d="M4 20c3.5 0 4.5-9 8-9s3.5 9 7 9 5-6 8.5-6" stroke="#6BB0FF" stroke-width="2.4" stroke-linecap="round"/>
+      <path d="M4 25c3.5 0 4.5-6 8-6s3.5 6 7 6 5-4 8.5-4" stroke="#4C8DFF" stroke-width="2.2" stroke-linecap="round" opacity=".55"/>
+    </svg>
+    Wisp
+  </a>
+  <div class="nav-links">
+    <a href="#memory">Memory</a>
+    <a href="#features">Features</a>
+    <a href="https://github.com/izoose/wisp-browser">GitHub</a>
+    <a class="btn btn-primary" href="https://github.com/izoose/wisp-browser/releases/latest/download/WispSetup.exe">Download</a>
+  </div>
+</div></nav>
+
+<span id="top"></span>
+<header class="hero"><div class="wrap">
+  <span class="badge"><span class="dot"></span>Free &amp; open source · Windows 10 / 11</span>
+  <h1 class="wordmark">wisp<b>.</b></h1>
+  <p class="lede">Chromium power, a wisp of the memory.</p>
+  <p class="sub">A quiet, dark browser for Windows that puts idle tabs to sleep — so a pile of tabs stops eating your RAM.</p>
+  <div class="cta">
+    <a class="btn btn-primary" href="https://github.com/izoose/wisp-browser/releases/latest/download/WispSetup.exe">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 21h16"/></svg>
+      Download for Windows
+    </a>
+    <a class="btn btn-ghost" href="https://github.com/izoose/wisp-browser">View on GitHub</a>
+  </div>
+  <p class="fine">One click. No .NET, no setup — the installer bundles everything.</p>
+</div></header>
+
+<section class="band" id="memory"><div class="wrap">
+  <div class="head rise">
+    <span class="eyebrow">The point</span>
+    <h2>Seven idle tabs shouldn't cost seven gigabytes.</h2>
+    <p>Brave was using ~7&nbsp;GB for a handful of tabs. Wisp runs one shared engine and, when a tab goes quiet, freezes it — then discards it — and wakes it instantly on your next click. Same eight tabs, measured end to end:</p>
+  </div>
+  <div class="chart rise" id="chart">
+    <div class="bar me">
+      <div class="name">Wisp<small>7 tabs slept</small></div>
+      <div class="track"><div class="fill me" style="--w:15.2%"></div></div>
+      <div class="val" data-to="711">0 MB</div>
+    </div>
+    <div class="bar">
+      <div class="name">Brave</div>
+      <div class="track"><div class="fill them" style="--w:56%"></div></div>
+      <div class="val" data-to="2615">0 MB</div>
+    </div>
+    <div class="bar">
+      <div class="name">Chrome</div>
+      <div class="track"><div class="fill them" style="--w:100%"></div></div>
+      <div class="val" data-to="4669">0 MB</div>
+    </div>
+    <div class="chart-note">
+      <span>~73% less than Brave · ~85% less than Chrome.</span>
+      <a href="https://github.com/izoose/wisp-browser/blob/main/docs/memory-case-study.md">Read the case study →</a>
+    </div>
+  </div>
+</div></section>
+
+<section class="band" id="features"><div class="wrap">
+  <div class="head rise">
+    <span class="eyebrow">Everything you'd expect</span>
+    <h2>Lean, not bare.</h2>
+    <p>A real daily driver — it just leaves out the parts that spy on you or hog your machine.</p>
+  </div>
+  <div class="grid">
+    <div class="card rise">
+      <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9"/><path d="M12 7v5l3 2"/></svg></div>
+      <h3>Tabs that sleep</h3>
+      <p>Background tabs freeze to free their memory, then discard when long-idle — and restore the instant you return.</p>
+    </div>
+    <div class="card rise">
+      <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-4"/></svg></div>
+      <h3>Native ad-block shield</h3>
+      <p>Ads and trackers blocked at the network level — with a per-site toggle and a live blocked count. YouTube ads skipped too.</p>
+    </div>
+    <div class="card rise">
+      <div class="ic"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/><path d="M17 15l3 2-3 2"/></svg></div>
+      <h3>Bring your stuff over</h3>
+      <p>Import cookies &amp; logins, passwords, bookmarks and history from Brave, Chrome, Edge, Vivaldi, Opera and more.</p>
+    </div>
+    <div class="card rise">
+      <div class="ic"><svg viewBox="0 0 24 24"><path d="M4 5h11v6H4z"/><path d="M15 8h3l2 3v5h-5"/><circle cx="7.5" cy="17.5" r="1.8"/><circle cx="16.5" cy="17.5" r="1.8"/></svg></div>
+      <h3>Chrome extensions</h3>
+      <p>Install straight from the Chrome Web Store — one “Add to Wisp” button, with popups, side panels and a manager.</p>
+    </div>
+    <div class="card rise">
+      <div class="ic"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg></div>
+      <h3>A real omnibox</h3>
+      <p>Live search suggestions, history &amp; bookmark matches, inline autocomplete, and keyword shortcuts like <b style="font-family:var(--mono);color:var(--accent-soft)">yt</b>.</p>
+    </div>
+    <div class="card rise">
+      <div class="ic"><svg viewBox="0 0 24 24"><path d="M20 15a8 8 0 1 1-9-11 6 6 0 0 0 9 8Z"/></svg></div>
+      <h3>Dark, quiet, private</h3>
+      <p>Dark everything with force-dark for stubborn sites, reader mode, private windows, and a native PDF viewer.</p>
+    </div>
+  </div>
+</div></section>
+
+<section class="band"><div class="wrap">
+  <div class="head rise">
+    <span class="eyebrow">The RAM lever</span>
+    <h2>How a tab goes to sleep.</h2>
+  </div>
+  <div class="strip rise">
+    <div class="step"><div class="n">ACTIVE</div><h4>You're using it</h4><p>The foreground tab runs at full speed with all its memory, exactly like any browser.</p></div>
+    <div class="step"><div class="n">ASLEEP</div><h4>You've moved on</h4><p>After a few minutes in the background the renderer is frozen and its memory reclaimed.</p></div>
+    <div class="step"><div class="n">DISCARDED</div><h4>Long forgotten</h4><p>Idle much longer and the tab is torn down to almost nothing — then reloads the moment you click it.</p></div>
+  </div>
+</div></section>
+
+<section class="final"><div class="wrap">
+  <h2>Browse light<b>.</b></h2>
+  <p>Free, open source, and self-contained. Download and run — that's it.</p>
+  <div class="cta">
+    <a class="btn btn-primary" href="https://github.com/izoose/wisp-browser/releases/latest/download/WispSetup.exe">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 21h16"/></svg>
+      Download for Windows
+    </a>
+    <a class="btn btn-ghost" href="https://github.com/izoose/wisp-browser/releases">All releases</a>
+  </div>
+  <p class="fine" style="margin-top:20px">Windows SmartScreen may warn on first run — More info → Run anyway.</p>
+</div></section>
+
+<footer><div class="wrap foot">
+  <div>© 2026 Wisp · MIT licensed · an independent project</div>
+  <div class="links">
+    <a href="https://github.com/izoose/wisp-browser">GitHub</a>
+    <a href="https://github.com/izoose/wisp-browser/releases">Releases</a>
+    <a href="https://github.com/izoose/wisp-browser/blob/main/docs/memory-case-study.md">Benchmarks</a>
+  </div>
+</div>
+<div class="wrap" style="color:var(--faint);font-size:.8rem;margin-top:16px">Not affiliated with Brave, Google, or Microsoft. Built on the Microsoft Edge WebView2 runtime.</div>
+</footer>
+
+<script>
+  var nav=document.getElementById('nav');
+  addEventListener('scroll',function(){nav.classList.toggle('stuck',scrollY>10)},{passive:true});
+  var reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var ro=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){e.target.classList.add('show');ro.unobserve(e.target);}});},{threshold:.15});
+  document.querySelectorAll('.rise').forEach(function(el){ro.observe(el);});
+  var chart=document.getElementById('chart');
+  var co=new IntersectionObserver(function(es){
+    es.forEach(function(e){
+      if(!e.isIntersecting) return;
+      chart.classList.add('in');
+      chart.querySelectorAll('.val').forEach(function(v){
+        var to=+v.dataset.to;
+        if(reduce){v.textContent=to.toLocaleString()+' MB';return;}
+        var t0=null,dur=1400;
+        function step(ts){if(!t0)t0=ts;var p=Math.min((ts-t0)/dur,1);var e2=1-Math.pow(1-p,3);
+          v.textContent=Math.round(to*e2).toLocaleString()+' MB';if(p<1)requestAnimationFrame(step);}
+        requestAnimationFrame(step);
+      });
+      co.unobserve(chart);
+    });
+  },{threshold:.35});
+  co.observe(chart);
+</script>
+</body>
+</html>
