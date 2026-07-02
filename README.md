@@ -77,17 +77,26 @@ The same 7-tab session in Brave was using ~7 GB.
 
 ## Getting it
 
-**Build from source** (needs the [.NET 8 SDK](https://dotnet.microsoft.com/download) and the WebView2
-Runtime, preinstalled on Windows 11):
+**Just want to use it?** Download **`WispSetup.exe`** from the
+[Releases](https://github.com/izoose/wisp-browser/releases) page and run it. No .NET, no dependencies —
+the build is self-contained. It installs per-user (no admin prompt) and adds Start Menu / Desktop
+shortcuts. A portable `.zip` (unzip and run `Wisp.exe`) is also attached.
+
+> First run may show a Windows SmartScreen notice because the build isn't code-signed —
+> click **More info → Run anyway**.
+
+**Build from source** (needs the [.NET 8 SDK](https://dotnet.microsoft.com/download); WebView2 Runtime is
+preinstalled on Windows 11):
 
 ```sh
 git clone https://github.com/izoose/wisp-browser.git
 cd wisp-browser
-dotnet publish Wisp/Wisp.csproj -c Release -o dist
+dotnet publish Wisp/Wisp.csproj -c Release -o dist   # framework-dependent
 dist/Wisp.exe
 ```
 
-Or grab a prebuilt `dist` from the [Releases](https://github.com/izoose/wisp-browser/releases) page.
+To reproduce the release installer: publish self-contained, then compile `installer/wisp.iss`
+with [Inno Setup](https://jrsoftware.org/isinfo.php) — see the header comment in that file.
 
 ## Where your data lives
 
