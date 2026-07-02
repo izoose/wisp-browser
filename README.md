@@ -6,6 +6,12 @@
 
 <p align="center">A lightweight, dark, barebones Windows browser — Chromium power without the RAM.</p>
 
+<p align="center">
+  <a href="https://izoose.github.io/wisp-browser/"><b>Website</b></a> ·
+  <a href="https://github.com/izoose/wisp-browser/releases/latest/download/WispSetup.exe"><b>Download</b></a> ·
+  <a href="docs/memory-case-study.md"><b>Benchmarks</b></a>
+</p>
+
 ---
 
 Wisp is a minimal browser built as a thin **WPF (.NET 8)** shell over **WebView2** (the Edge/Chromium

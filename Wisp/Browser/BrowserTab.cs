@@ -91,6 +91,10 @@ public class BrowserTab : INotifyPropertyChanged
     /// <summary>Ad/tracker requests blocked on the current page (reset when navigating).</summary>
     public int BlockedCount { get; set; }
 
+    /// <summary>The tab this one was opened from (a link/middle-click), so it can be placed
+    /// right next to its parent instead of at the end of the strip. Runtime-only.</summary>
+    public BrowserTab? Opener { get; set; }
+
     /// <summary>The live control, or null when the tab is discarded.</summary>
     public WebView2? View { get; set; }
 

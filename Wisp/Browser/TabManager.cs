@@ -323,6 +323,30 @@ public class TabManager
         return tab;
     }
 
+    /// <summary>Opens a link (middle-click / target=_blank) as a background tab placed right after
+    /// the tab it came from, like Chrome — not at the end of the strip.</summary>
+    public async Task<BrowserTab> OpenChildTabAsync(string url, BrowserTab opener)
+    {
+        var tab = new BrowserTab { Url = url, Title = "New Tab", State = TabState.Background, Opener = opener };
+        InsertAdjacent(tab, opener);
+        await EnsureViewAsync(tab);
+        tab.LastActiveUtc = DateTime.UtcNow;
+        return tab;
+    }
+
+    /// <summary>Inserts a tab right after its opener (and after any siblings already opened from
+    /// the same tab), skipping the pinned block so a normal tab never lands among pinned ones.</summary>
+    private void InsertAdjacent(BrowserTab tab, BrowserTab? opener)
+    {
+        int i = opener != null ? Tabs.IndexOf(opener) : -1;
+        if (i < 0) { Tabs.Add(tab); return; }
+        int insert = i + 1;
+        while (insert < Tabs.Count && Tabs[insert].Opener == opener) insert++;
+        if (!tab.IsPinned)
+            while (insert < Tabs.Count && Tabs[insert].IsPinned) insert++;
+        Tabs.Insert(insert, tab);
+    }
+
     // ---- WebView2 lifecycle ----------------------------------------------------------
 
     private async Task EnsureViewAsync(BrowserTab tab)
@@ -427,8 +451,8 @@ public class TabManager
             }
             else
             {
-                e.Handled = true; // a plain new window / target=_blank — open as a tab
-                _ = NewTabAsync(e.Uri, true);
+                e.Handled = true; // a plain new window / target=_blank / middle-click — open as a tab
+                _ = OpenChildTabAsync(e.Uri, tab); // background, right next to the opener
             }
         };
         cw.WebMessageReceived += (_, e) =>
@@ -444,6 +468,10 @@ public class TabManager
         await cw.AddScriptToExecuteOnDocumentCreatedAsync(AcceleratorScript);
         // Adds an "Add to Wisp" button on Chrome Web Store detail pages.
         await cw.AddScriptToExecuteOnDocumentCreatedAsync(StoreButtonScript);
+        // YouTube ads share the video's own domain, so the network blocker can't touch them —
+        // skip them in the player instead (also dodges YouTube's anti-adblock nag).
+        if (AdBlockEngine.Enabled)
+            await cw.AddScriptToExecuteOnDocumentCreatedAsync(YouTubeAdSkipScript);
 
         cw.Navigate(string.IsNullOrEmpty(tab.Url) ? NewTabUrl : tab.Url);
     }
@@ -618,5 +646,39 @@ public class TabManager
   }
   sync();
   setInterval(sync, 1000);
+})();";
+
+    /// <summary>YouTube serves ads from the video's own domain, so we can't block them at the
+    /// network layer without breaking playback. Instead: hide static ad slots, click skip when
+    /// offered, and seek unskippable ads to their end. Skipping in-player also avoids YouTube's
+    /// anti-adblock detection (which watches for blocked ad requests).</summary>
+    private const string YouTubeAdSkipScript = @"
+(function () {
+  if (!/(^|\.)youtube(-nocookie)?\.com$/.test(location.hostname)) return;
+  var css = ['.ytp-ad-module','.ytp-ad-overlay-container','.ytp-ad-image-overlay','.ytp-ad-overlay-slot',
+    'ytd-ad-slot-renderer','ytd-in-feed-ad-layout-renderer','ytd-banner-promo-renderer',
+    'ytd-statement-banner-renderer','#masthead-ad','ytd-promoted-sparse-video-renderer',
+    'ytd-companion-slot-renderer','ytd-promoted-video-renderer','ytd-display-ad-renderer',
+    '#player-ads','.ytd-ad-slot-renderer'].join(',') + '{display:none!important}';
+  function addStyle(){ if (document.getElementById('wisp-yt')) return; var s=document.createElement('style'); s.id='wisp-yt'; s.textContent=css; (document.head||document.documentElement).appendChild(s); }
+  addStyle();
+  var weMuted = false;
+  function tick(){
+    try {
+      addStyle();
+      var player = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+      var video = document.querySelector('video.html5-main-video') || document.querySelector('video');
+      var skip = document.querySelector('.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button');
+      if (skip) skip.click();
+      var ad = player && player.classList.contains('ad-showing');
+      if (ad && video) {
+        if (isFinite(video.duration) && video.duration > 0) video.currentTime = video.duration;
+        if (!video.muted) { video.muted = true; weMuted = true; }
+      } else if (weMuted && video) {
+        video.muted = false; weMuted = false;
+      }
+    } catch (e) {}
+  }
+  setInterval(tick, 250);
 })();";
 }
