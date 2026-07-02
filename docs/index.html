@@ -6,6 +6,7 @@
 <title>Wisp — a lightweight, dark browser for Windows</title>
 <meta name="description" content="Chromium power, a wisp of the memory. A quiet, dark browser for Windows that puts idle tabs to sleep — the same 8 tabs use ~73% less RAM than Brave and ~85% less than Chrome.">
 <meta name="theme-color" content="#0A0D14">
+<meta name="color-scheme" content="dark">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230A0D14'/%3E%3Cpath d='M4 19c3.5 0 4.5-9 8-9s3.5 9 7 9 5-6 8.5-6' stroke='%236BB0FF' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3Cpath d='M4 24c3.5 0 4.5-6 8-6s3.5 6 7 6 5-4 8.5-4' stroke='%234C8DFF' stroke-width='2.2' fill='none' stroke-linecap='round' opacity='.55'/%3E%3C/svg%3E">
 <meta property="og:title" content="Wisp — a lightweight, dark browser for Windows">
 <meta property="og:description" content="Chromium power, a wisp of the memory. Idle tabs sleep, so a pile of tabs stops eating your RAM.">
@@ -23,6 +24,7 @@
     --sans-text:"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,sans-serif;
     --mono:"Cascadia Code","Cascadia Mono",ui-monospace,Consolas,"SFMono-Regular",monospace;
     --maxw:1080px;
+    color-scheme:dark;
   }
   *{box-sizing:border-box;margin:0;padding:0}
   html{scroll-behavior:smooth}
@@ -50,8 +52,12 @@
   .brand{display:flex;align-items:center;gap:11px;font-family:var(--sans);font-weight:600;font-size:1.15rem;letter-spacing:-.01em}
   .mark{width:26px;height:26px;flex:none}
   .nav-links{display:flex;align-items:center;gap:30px}
-  .nav-links a{color:var(--dim);font-size:.95rem;transition:color .2s}
+  .nav-links a{color:var(--dim);font-size:.95rem;transition:color .2s,transform .12s ease;display:inline-block}
   .nav-links a:hover{color:var(--text)}
+  .nav-links a:not(.btn):active{transform:scale(.9);color:var(--accent-soft)}
+  .btn:active{transform:translateY(0) scale(.96)!important}
+  a.tapped{animation:tap .32s ease}
+  @keyframes tap{0%{transform:scale(1)}40%{transform:scale(.9)}100%{transform:scale(1)}}
   .btn{display:inline-flex;align-items:center;gap:9px;font-family:var(--sans);font-weight:600;border-radius:11px;padding:11px 20px;font-size:.96rem;cursor:pointer;transition:.2s;border:1px solid transparent;white-space:nowrap}
   .btn-primary{background:linear-gradient(180deg,#5EA0FF,#4C8DFF 55%,#3B7DF2);color:#fff;text-shadow:0 1px 1px rgba(2,16,48,.38);box-shadow:0 6px 16px -6px rgba(76,141,255,.5),inset 0 1px 0 rgba(255,255,255,.5),inset 0 0 0 1px rgba(255,255,255,.08)}
   .btn-primary:hover{transform:translateY(-2px);background:linear-gradient(180deg,#73ADFF,#4E90FF 55%,#3F82F6);box-shadow:0 12px 26px -8px rgba(76,141,255,.62),inset 0 1px 0 rgba(255,255,255,.55),inset 0 0 0 1px rgba(255,255,255,.1)}
@@ -276,6 +282,11 @@
   var nav=document.getElementById('nav');
   addEventListener('scroll',function(){nav.classList.toggle('stuck',scrollY>10)},{passive:true});
   var reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Tactile press animation on every nav link.
+  document.querySelectorAll('.nav-links a, .cta a').forEach(function(a){
+    a.addEventListener('click',function(){a.classList.remove('tapped');void a.offsetWidth;a.classList.add('tapped');setTimeout(function(){a.classList.remove('tapped');},340);});
+  });
 
   // Eased smooth-scroll for in-page anchor links (accounts for the sticky nav).
   function easeInOutCubic(p){return p<.5?4*p*p*p:1-Math.pow(-2*p+2,3)/2}
