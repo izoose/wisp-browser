@@ -60,7 +60,9 @@
   .btn-ghost:hover{border-color:var(--accent);background:rgba(76,141,255,.08)}
   @media(max-width:640px){.nav-links a:not(.btn){display:none}}
 
-  .hero{text-align:center;padding:112px 0 96px}
+  .hero{text-align:center;padding:96px 0 96px}
+  .heromark{width:76px;height:76px;display:block;margin:0 auto 10px;filter:drop-shadow(0 6px 26px rgba(76,141,255,.55));animation:bob 6.5s ease-in-out infinite}
+  @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
   .badge{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:.76rem;letter-spacing:.04em;color:var(--dim);border:1px solid var(--line);border-radius:999px;padding:6px 14px;margin-bottom:34px;background:rgba(255,255,255,.02)}
   .badge .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px var(--accent)}
   .wordmark{font-family:var(--sans);font-weight:300;letter-spacing:-.045em;line-height:.9;font-size:clamp(4.4rem,15vw,10rem);margin-bottom:8px}
@@ -148,6 +150,10 @@
 <span id="top"></span>
 <header class="hero"><div class="wrap">
   <span class="badge"><span class="dot"></span>Free &amp; open source · Windows 10 / 11</span>
+  <svg class="heromark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+    <path d="M3 19c4 0 5-11 9-11s4 11 8 11 5.5-7 9-7" stroke="#6BB0FF" stroke-width="2.6" stroke-linecap="round"/>
+    <path d="M3 25c4 0 5-7 9-7s4 7 8 7 5.5-4.5 9-4.5" stroke="#4C8DFF" stroke-width="2.4" stroke-linecap="round" opacity=".55"/>
+  </svg>
   <h1 class="wordmark">wisp<b>.</b></h1>
   <p class="lede">Chromium power, a wisp of the memory.</p>
   <p class="sub">A quiet, dark browser for Windows that puts idle tabs to sleep — so a pile of tabs stops eating your RAM.</p>
@@ -185,7 +191,7 @@
     </div>
     <div class="chart-note">
       <span>~73% less than Brave · ~85% less than Chrome.</span>
-      <a href="https://github.com/izoose/wisp-browser/blob/main/docs/memory-case-study.md">Read the case study →</a>
+      <a href="case-study.html">Read the full case study →</a>
     </div>
   </div>
 </div></section>
@@ -260,7 +266,7 @@
   <div class="links">
     <a href="https://github.com/izoose/wisp-browser">GitHub</a>
     <a href="https://github.com/izoose/wisp-browser/releases">Releases</a>
-    <a href="https://github.com/izoose/wisp-browser/blob/main/docs/memory-case-study.md">Benchmarks</a>
+    <a href="case-study.html">Benchmarks</a>
   </div>
 </div>
 <div class="wrap" style="color:var(--faint);font-size:.8rem;margin-top:16px">Not affiliated with Brave, Google, or Microsoft. Built on the Microsoft Edge WebView2 runtime.</div>

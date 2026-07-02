@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wisp — memory case study</title>
+<meta name="description" content="Wisp vs Brave vs Chrome: the same 8 tabs measured end to end. Wisp holds them in ~73% less RAM than Brave and ~85% less than Chrome.">
+<meta name="theme-color" content="#0A0D14">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230A0D14'/%3E%3Cpath d='M4 19c3.5 0 4.5-9 8-9s3.5 9 7 9 5-6 8.5-6' stroke='%236BB0FF' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --bg:#0A0D14;--bg2:#0C1018;--surface:#121824;--surface2:#161E2C;--line:#1E2635;--line2:#283245;
+    --text:#E7EBF3;--dim:#8B95A9;--faint:#59637A;--accent:#4C8DFF;--accent-soft:#6BB0FF;--accent-deep:#2F6BE0;
+    --warn:#E8A33D;--bad:#E5484D;
+    --sans:"Segoe UI Variable Display","Segoe UI",system-ui,-apple-system,sans-serif;
+    --sans-text:"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,sans-serif;
+    --mono:"Cascadia Code","Cascadia Mono",ui-monospace,Consolas,monospace;--maxw:1000px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--bg);color:var(--text);font-family:var(--sans-text);line-height:1.65;-webkit-font-smoothing:antialiased;overflow-x:hidden;font-size:17px}
+  a{color:inherit;text-decoration:none}
+  ::selection{background:rgba(76,141,255,.28)}
+  .glow{position:fixed;inset:0;z-index:-1;overflow:hidden;pointer-events:none}
+  .glow b{position:absolute;border-radius:50%;filter:blur(80px);opacity:.42;display:block}
+  .g1{width:50vw;height:50vw;left:-10vw;top:-16vw;background:radial-gradient(circle,rgba(76,141,255,.4),transparent 66%);animation:drift 30s ease-in-out infinite}
+  .g2{width:46vw;height:46vw;right:-12vw;top:34vw;background:radial-gradient(circle,rgba(47,107,224,.3),transparent 66%);animation:drift 38s ease-in-out infinite reverse}
+  @keyframes drift{0%,100%{transform:translate(0,0)}50%{transform:translate(5vw,4vw)}}
+
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 28px}
+  .eyebrow{font-family:var(--mono);font-size:.72rem;letter-spacing:.22em;text-transform:uppercase;color:var(--accent-soft);opacity:.85}
+  nav{position:sticky;top:0;z-index:20;backdrop-filter:blur(14px);background:linear-gradient(180deg,rgba(10,13,20,.86),rgba(10,13,20,.5));border-bottom:1px solid var(--line)}
+  .nav{display:flex;align-items:center;justify-content:space-between;height:64px}
+  .brand{display:flex;align-items:center;gap:11px;font-family:var(--sans);font-weight:600;font-size:1.12rem}
+  .brand svg{width:24px;height:24px}
+  .nav a.back{color:var(--dim);font-size:.95rem}.nav a.back:hover{color:var(--text)}
+
+  header.top{text-align:center;padding:84px 0 40px}
+  header.top h1{font-family:var(--sans);font-weight:300;letter-spacing:-.03em;font-size:clamp(2.6rem,7vw,4.6rem);line-height:1.02;margin:16px 0 18px;text-wrap:balance}
+  header.top h1 b{font-weight:300;color:var(--accent);text-shadow:0 0 40px rgba(76,141,255,.6)}
+  header.top p{color:var(--dim);font-size:1.2rem;max-width:56ch;margin:0 auto;text-wrap:balance}
+  .meta{margin-top:26px;font-family:var(--mono);font-size:.8rem;color:var(--faint);letter-spacing:.03em}
+
+  section{padding:64px 0;border-top:1px solid var(--line)}
+  .h2{font-family:var(--sans);font-weight:600;letter-spacing:-.02em;font-size:clamp(1.7rem,4vw,2.5rem);line-height:1.1;margin:12px 0 10px;text-wrap:balance}
+  .lead{color:var(--dim);font-size:1.1rem;max-width:60ch;margin-bottom:36px}
+
+  .chart{background:linear-gradient(180deg,var(--surface),var(--bg2));border:1px solid var(--line);border-radius:20px;padding:34px clamp(20px,4vw,44px)}
+  .bar{display:grid;grid-template-columns:96px 1fr auto;align-items:center;gap:18px;padding:15px 0}
+  .bar+.bar{border-top:1px solid var(--line)}
+  .bar .name{font-family:var(--sans);font-weight:600;font-size:1.05rem}
+  .bar .name small{display:block;font-weight:400;color:var(--faint);font-size:.75rem;margin-top:1px;font-family:var(--sans-text)}
+  .track{height:28px;border-radius:8px;background:rgba(255,255,255,.035);overflow:hidden}
+  .fill{height:100%;width:0;border-radius:8px;transition:width 1.5s cubic-bezier(.16,1,.3,1)}
+  .in .fill{width:var(--w)}
+  .fill.me{background:linear-gradient(90deg,var(--accent-deep),var(--accent-soft));box-shadow:0 0 26px -2px rgba(76,141,255,.8)}
+  .fill.me2{background:linear-gradient(90deg,#264A86,#4C8DFF)}
+  .fill.them{background:linear-gradient(90deg,#2A3242,#3C475E)}
+  .val{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:1.05rem;color:var(--dim);min-width:96px;text-align:right}
+  .bar.me .val{color:var(--accent-soft)}
+
+  .ratios{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:26px}
+  @media(max-width:560px){.ratios{grid-template-columns:1fr}}
+  .rcard{border:1px solid var(--line);border-radius:16px;padding:26px 28px;background:var(--surface)}
+  .rcard .big{font-family:var(--sans);font-weight:300;font-size:clamp(2.6rem,7vw,3.6rem);letter-spacing:-.03em;color:var(--accent-soft);line-height:1;font-variant-numeric:tabular-nums}
+  .rcard .lbl{color:var(--dim);margin-top:8px;font-size:1rem}
+
+  /* process dots */
+  .proc{display:grid;gap:22px}
+  .prow{display:grid;grid-template-columns:120px 1fr auto;gap:18px;align-items:center}
+  @media(max-width:600px){.prow{grid-template-columns:1fr;gap:8px}}
+  .prow .plabel{font-family:var(--sans);font-weight:600}
+  .prow .plabel small{display:block;color:var(--faint);font-weight:400;font-size:.76rem;font-family:var(--sans-text)}
+  .dots{display:flex;flex-wrap:wrap;gap:5px}
+  .dots i{width:11px;height:11px;border-radius:3px;background:#313A4C;opacity:0;transform:scale(.4);transition:opacity .28s ease,transform .28s cubic-bezier(.2,1.4,.4,1)}
+  .dots.me i{background:var(--accent)}
+  .dots.warn i{background:#3C475E}
+  .dots.bad i{background:#48505F}
+  .shown i{opacity:1;transform:none}
+  .pcount{font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--dim);min-width:96px;text-align:right}
+  .prow.me .pcount{color:var(--accent-soft)}
+
+  /* per-tab */
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media(max-width:560px){.split{grid-template-columns:1fr}}
+  .tcard{border:1px solid var(--line);border-radius:18px;padding:30px;background:linear-gradient(180deg,var(--surface),var(--bg2));text-align:center}
+  .tcard .num{font-family:var(--sans);font-weight:300;font-size:clamp(2.4rem,7vw,3.4rem);letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+  .tcard.me .num{color:var(--accent-soft);text-shadow:0 0 30px rgba(76,141,255,.5)}
+  .tcard .cap{color:var(--dim);margin-top:6px}
+  .tcard .sub{color:var(--faint);font-size:.85rem;margin-top:2px}
+
+  /* lifecycle */
+  .life{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--line);border-radius:18px;overflow:hidden;background:var(--surface)}
+  @media(max-width:720px){.life{grid-template-columns:1fr}}
+  .stage{padding:30px 26px}.stage+.stage{border-left:1px solid var(--line)}
+  @media(max-width:720px){.stage+.stage{border-left:0;border-top:1px solid var(--line)}}
+  .stage .n{font-family:var(--mono);color:var(--accent-soft);font-size:.78rem;letter-spacing:.12em;margin-bottom:12px}
+  .stage h4{font-family:var(--sans);font-weight:600;font-size:1.06rem;margin-bottom:6px}
+  .stage p{color:var(--dim);font-size:.95rem}
+  .stage .mem{margin-top:14px;font-family:var(--mono);font-size:.85rem;color:var(--faint)}
+  .stage.a .bar-i{background:var(--accent)}.stage.b .bar-i{background:#3C6BB0}.stage.c .bar-i{background:#2A3547}
+  .bar-i{height:6px;border-radius:3px;margin-top:16px;transition:width 1.2s cubic-bezier(.16,1,.3,1);width:0}
+  .in .bar-i{width:var(--w)}
+
+  ul.notes{list-style:none;display:grid;gap:14px}
+  ul.notes li{color:var(--dim);padding-left:26px;position:relative;font-size:1rem;max-width:64ch}
+  ul.notes li::before{content:'';position:absolute;left:0;top:10px;width:8px;height:8px;border-radius:50%;background:var(--accent);opacity:.6}
+  .method{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:28px 30px}
+  .method dl{display:grid;grid-template-columns:150px 1fr;gap:12px 22px}
+  @media(max-width:560px){.method dl{grid-template-columns:1fr}}
+  .method dt{font-family:var(--mono);font-size:.78rem;letter-spacing:.08em;text-transform:uppercase;color:var(--accent-soft);padding-top:3px}
+  .method dd{color:var(--dim)}
+
+  .cta{text-align:center;padding:80px 0}
+  .btn{display:inline-flex;align-items:center;gap:9px;font-family:var(--sans);font-weight:600;border-radius:11px;padding:14px 26px;font-size:1.02rem;background:linear-gradient(180deg,#5EA0FF,#4C8DFF 55%,#3B7DF2);color:#fff;text-shadow:0 1px 1px rgba(2,16,48,.38);box-shadow:0 6px 16px -6px rgba(76,141,255,.5),inset 0 1px 0 rgba(255,255,255,.5);transition:.2s}
+  .btn:hover{transform:translateY(-2px)}
+  footer{border-top:1px solid var(--line);padding:34px 0 54px;color:var(--faint);font-size:.88rem;text-align:center}
+
+  .rise{opacity:0;transform:translateY(22px);transition:opacity .8s ease,transform .8s cubic-bezier(.16,1,.3,1)}
+  .rise.show{opacity:1;transform:none}
+  @media(prefers-reduced-motion:reduce){*{animation:none!important}html{scroll-behavior:auto}.rise{opacity:1;transform:none;transition:none}.fill,.bar-i,.dots i{transition:none}}
+</style>
+</head>
+<body>
+<div class="glow"><b class="g1"></b><b class="g2"></b></div>
+
+<nav><div class="wrap nav">
+  <a class="brand" href="index.html">
+    <svg viewBox="0 0 32 32" fill="none"><path d="M4 20c3.5 0 4.5-9 8-9s3.5 9 7 9 5-6 8.5-6" stroke="#6BB0FF" stroke-width="2.4" stroke-linecap="round"/><path d="M4 25c3.5 0 4.5-6 8-6s3.5 6 7 6 5-4 8.5-4" stroke="#4C8DFF" stroke-width="2.2" stroke-linecap="round" opacity=".55"/></svg>
+    Wisp
+  </a>
+  <a class="back" href="index.html">← Back to home</a>
+</div></nav>
+
+<header class="top"><div class="wrap">
+  <span class="eyebrow">Memory case study</span>
+  <h1>The same 8 tabs. A quarter of the memory<b>.</b></h1>
+  <p>Wisp was built because Brave used ~7&nbsp;GB for a handful of tabs. So we measured it — Wisp, Brave and Chrome, the same eight sites, fresh profiles, the entire process tree.</p>
+  <div class="meta">Windows 11 · single run · working-set (physical RAM) · 2026-07-02</div>
+</div></header>
+
+<section><div class="wrap">
+  <span class="eyebrow">The headline</span>
+  <div class="h2 rise">Total memory, 8 tabs</div>
+  <p class="lead rise">Wisp measured twice — right after loading (all tabs live) and after its sleep/discard timers ran (the realistic daily-driver state, 1 active + 7 slept).</p>
+  <div class="chart rise" id="chart">
+    <div class="bar me"><div class="name">Wisp<small>7 tabs slept</small></div><div class="track"><div class="fill me" style="--w:15.2%"></div></div><div class="val" data-to="711">0 MB</div></div>
+    <div class="bar"><div class="name">Wisp<small>all 8 live</small></div><div class="track"><div class="fill me2" style="--w:47.2%"></div></div><div class="val" data-to="2204">0 MB</div></div>
+    <div class="bar"><div class="name">Brave</div><div class="track"><div class="fill them" style="--w:56%"></div></div><div class="val" data-to="2615">0 MB</div></div>
+    <div class="bar"><div class="name">Chrome</div><div class="track"><div class="fill them" style="--w:100%"></div></div><div class="val" data-to="4669">0 MB</div></div>
+  </div>
+  <div class="ratios rise">
+    <div class="rcard"><div class="big" data-count="3.7">0</div><div class="lbl">as much RAM in Brave as Wisp (slept)</div></div>
+    <div class="rcard"><div class="big" data-count="6.6">0</div><div class="lbl">as much RAM in Chrome as Wisp (slept)</div></div>
+  </div>
+</div></section>
+
+<section><div class="wrap">
+  <span class="eyebrow">Where it goes</span>
+  <div class="h2 rise">The process explosion</div>
+  <p class="lead rise">Chromium spawns a process per site, plus GPU, network and utility helpers. For eight tabs, Chrome fanned out to <b style="color:var(--text)">59 processes</b>. Wisp's slept state runs in <b style="color:var(--accent-soft)">8</b>. Every live renderer is memory you're paying for.</p>
+  <div class="chart rise" id="proc">
+    <div class="proc">
+      <div class="prow me"><div class="plabel">Wisp<small>7 slept</small></div><div class="dots me" data-n="8"></div><div class="pcount"><span data-to="8">0</span> procs</div></div>
+      <div class="prow"><div class="plabel">Brave</div><div class="dots warn" data-n="28"></div><div class="pcount"><span data-to="28">0</span> procs</div></div>
+      <div class="prow"><div class="plabel">Chrome</div><div class="dots bad" data-n="59"></div><div class="pcount"><span data-to="59">0</span> procs</div></div>
+    </div>
+  </div>
+</div></section>
+
+<section><div class="wrap">
+  <span class="eyebrow">Per tab</span>
+  <div class="h2 rise">What one tab really costs</div>
+  <p class="lead rise">Spread across eight tabs, the difference is stark — because Wisp isn't keeping idle renderers alive.</p>
+  <div class="split rise">
+    <div class="tcard me"><div class="num"><span data-to="89">0</span> MB</div><div class="cap">per tab in Wisp</div><div class="sub">711 MB ÷ 8, background tabs slept</div></div>
+    <div class="tcard"><div class="num"><span data-to="584">0</span> MB</div><div class="cap">per tab in Chrome</div><div class="sub">4,669 MB ÷ 8, all live</div></div>
+  </div>
+</div></section>
+
+<section><div class="wrap">
+  <span class="eyebrow">The mechanism</span>
+  <div class="h2 rise">How a tab lets go of its memory</div>
+  <p class="lead rise">This is the whole trick — and where the 2,204&nbsp;→&nbsp;711&nbsp;MB drop comes from.</p>
+  <div class="life rise" id="life">
+    <div class="stage a"><div class="n">ACTIVE</div><h4>You're using it</h4><p>Full speed, all its memory — exactly like any browser.</p><div class="mem">~200–300 MB</div><div class="bar-i" style="--w:100%"></div></div>
+    <div class="stage b"><div class="n">ASLEEP</div><h4>A few minutes idle</h4><p>The renderer is frozen and its memory reclaimed. Wakes instantly when you click back.</p><div class="mem">near zero</div><div class="bar-i" style="--w:22%"></div></div>
+    <div class="stage c"><div class="n">DISCARDED</div><h4>Long forgotten</h4><p>Torn down to almost nothing; reloads the moment you return to it.</p><div class="mem">~0 MB</div><div class="bar-i" style="--w:6%"></div></div>
+  </div>
+</div></section>
+
+<section><div class="wrap">
+  <span class="eyebrow">How it was measured</span>
+  <div class="h2 rise">Method</div>
+  <div class="method rise">
+    <dl>
+      <dt>Tabs</dt><dd>YouTube, Reddit, Wikipedia, GitHub Trending, CNN, Amazon, weather.com, ESPN — identical for all three.</dd>
+      <dt>Isolation</dt><dd>Each browser ran on its own throwaway profile (fresh — no extensions, sessions or open tabs). Wisp ran with its single-instance lock bypassed so it didn't merge into the everyday copy.</dd>
+      <dt>Metric</dt><dd>Sum of the working set (physical RAM) of every process in that browser's tree, collected 65 s after launch.</dd>
+      <dt>Wisp ×2</dt><dd>Measured right after load (all live) and again after its sleep/discard timers ran — the realistic state.</dd>
+      <dt>Reproduce</dt><dd><a href="https://github.com/izoose/wisp-browser/blob/main/scripts/bench.ps1" style="color:var(--accent-soft)">scripts/bench.ps1</a> in the repo.</dd>
+    </dl>
+  </div>
+</div></section>
+
+<section><div class="wrap">
+  <span class="eyebrow">Being honest</span>
+  <div class="h2 rise">Caveats</div>
+  <ul class="notes rise">
+    <li>Working set counts some shared memory per process, so absolute totals run a little high — but all three are Chromium, so the comparison is apples-to-apples.</li>
+    <li>Single run on one machine; RAM fluctuates a few percent between runs. Treat the numbers as directional — the 3–7× ratios are large and stable enough to matter.</li>
+    <li>Any Chromium browser uses similar RAM per <em>live</em> tab. Wisp doesn't beat physics on an active page — it wins by not keeping idle tabs alive.</li>
+    <li>Chrome's high figure reflects its default full site-isolation and helper processes; a machine with fewer cores may show fewer.</li>
+  </ul>
+</div></section>
+
+<div class="cta"><div class="wrap">
+  <a class="btn" href="https://github.com/izoose/wisp-browser/releases/latest/download/WispSetup.exe">Download Wisp for Windows</a>
+</div></div>
+
+<footer><div class="wrap">© 2026 Wisp · <a href="index.html" style="color:var(--dim)">Home</a> · <a href="https://github.com/izoose/wisp-browser" style="color:var(--dim)">GitHub</a> · Not affiliated with Brave, Google, or Microsoft.</div></footer>
+
+<script>
+  var reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function countUp(el,to,dur,fmt){
+    if(reduce){el.textContent=fmt(to);return;}
+    var t0=null;function step(ts){if(!t0)t0=ts;var p=Math.min((ts-t0)/dur,1);var e=1-Math.pow(1-p,3);
+      el.textContent=fmt(to*e);if(p<1)requestAnimationFrame(step);}requestAnimationFrame(step);
+  }
+  // reveal
+  var ro=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){e.target.classList.add('show');ro.unobserve(e.target);}});},{threshold:.14});
+  document.querySelectorAll('.rise').forEach(function(el){ro.observe(el);});
+
+  // once helper
+  function once(el,cb){var o=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){cb();o.unobserve(el);}});},{threshold:.3});o.observe(el);}
+
+  once(document.getElementById('chart'),function(){
+    var c=document.getElementById('chart');c.classList.add('in');
+    c.querySelectorAll('.val').forEach(function(v){countUp(v,+v.dataset.to,1400,function(n){return Math.round(n).toLocaleString()+' MB';});});
+    document.querySelectorAll('.rcard .big').forEach(function(b){countUp(b,+b.dataset.count,1400,function(n){return '×'+n.toFixed(1);});});
+  });
+
+  // process dots
+  document.querySelectorAll('.dots').forEach(function(d){
+    var n=+d.dataset.n;for(var i=0;i<n;i++){d.appendChild(document.createElement('i'));}
+  });
+  once(document.getElementById('proc'),function(){
+    document.querySelectorAll('#proc .dots').forEach(function(d){
+      var items=d.querySelectorAll('i');
+      items.forEach(function(it,i){setTimeout(function(){it.parentNode.classList.add('shown');it.style.transitionDelay='0ms';it.style.opacity=1;it.style.transform='none';},reduce?0:i*22);});
+    });
+    document.querySelectorAll('#proc .pcount span').forEach(function(s){countUp(s,+s.dataset.to,1200,function(n){return Math.round(n);});});
+  });
+
+  // per-tab
+  document.querySelectorAll('.tcard .num span').forEach(function(s){
+    once(s,function(){countUp(s,+s.dataset.to,1300,function(n){return Math.round(n);});});
+  });
+
+  var life=document.getElementById('life');
+  once(life,function(){life.classList.add('in');});
+</script>
+</body>
+</html>
