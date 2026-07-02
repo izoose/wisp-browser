@@ -1,0 +1,8 @@
+# Normalize line endings; treat these as binary so they aren't munged.
+* text=auto
+*.png binary
+*.ico binary
+*.js text
+*.cs text
+*.xaml text
+*.html text

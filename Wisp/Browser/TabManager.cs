@@ -1,0 +1,622 @@
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media.Imaging;
+using Microsoft.Web.WebView2.Core;
+using Microsoft.Web.WebView2.Wpf;
+
+namespace Wisp;
+
+/// <summary>
+/// Owns the set of tabs and their WebView2 lifecycle. Tabs are shown by toggling the
+/// visibility of one WebView2 per tab inside a shared host panel (never a WPF TabControl,
+/// which unloads inactive tabs and breaks WebView2). Creation is lazy: a tab has no
+/// WebView2 until it is first activated.
+/// </summary>
+public class TabManager
+{
+    /// <summary>Local dark new-tab page, served from the bundled Resources folder.</summary>
+    public const string NewTabUrl = "https://wisp.newtab/newtab.html";
+    private const string NewTabHost = "wisp.newtab";
+
+    private readonly BrowserEnvironment _env;
+    private readonly AppSettings _settings;
+    private readonly Panel _host;
+
+    public ObservableCollection<BrowserTab> Tabs { get; } = new();
+    public BrowserTab? Active { get; private set; }
+
+    /// <summary>Raised when the active tab changes or navigates (refresh chrome/address bar).</summary>
+    public event Action? ActiveTabUpdated;
+
+    /// <summary>Raised (on the UI thread) when web content asks for a browser action via a
+    /// keyboard shortcut. See <see cref="AcceleratorScript"/>.</summary>
+    public event Action<string>? AcceleratorRequested;
+
+    /// <summary>Raised (url, title) as pages commit/finish, for history recording.</summary>
+    public event Action<string, string>? PageVisited;
+
+    /// <summary>Raised when a download begins (default UI suppressed so we show our own).</summary>
+    public event Action<CoreWebView2DownloadOperation>? DownloadStarted;
+
+    /// <summary>Raised when the active tab's web content enters/exits element fullscreen (e.g. a video).</summary>
+    public event Action<bool>? FullScreenChanged;
+
+    /// <summary>Recently-closed tabs, for Ctrl+Shift+T. Newest last.</summary>
+    private readonly List<SessionTab> _closed = new();
+    public bool HasClosedTabs => _closed.Count > 0;
+
+    public TabManager(BrowserEnvironment env, AppSettings settings, Panel host)
+    {
+        _env = env;
+        _settings = settings;
+        _host = host;
+    }
+
+    public async Task<BrowserTab> NewTabAsync(string url, bool activate)
+    {
+        var tab = new BrowserTab { Url = url, Title = "New Tab", State = TabState.Discarded };
+        Tabs.Add(tab);
+        if (activate)
+            await ActivateAsync(tab);
+        return tab;
+    }
+
+    /// <summary>Adds a tab from restored session state without creating its WebView2 yet.</summary>
+    public BrowserTab AddLazyTab(string url, string title, bool isPinned = false)
+    {
+        var tab = new BrowserTab
+        {
+            Url = url,
+            Title = string.IsNullOrEmpty(title) ? "New Tab" : title,
+            State = TabState.Discarded,
+            IsPinned = isPinned,
+        };
+        Tabs.Add(tab);
+        return tab;
+    }
+
+    /// <summary>Captures the current tabs for session persistence.</summary>
+    public SessionData Snapshot()
+    {
+        var data = new SessionData { ActiveIndex = Active != null ? Tabs.IndexOf(Active) : 0 };
+        foreach (var t in Tabs)
+            data.Tabs.Add(new SessionTab { Url = t.Url, Title = t.Title, IsPinned = t.IsPinned });
+        return data;
+    }
+
+    public async Task ActivateAsync(BrowserTab tab)
+    {
+        if (Active == tab)
+        {
+            await EnsureViewAsync(tab);
+            if (tab.View != null) tab.View.Visibility = Visibility.Visible;
+            return;
+        }
+
+        if (Active != null)
+        {
+            Active.IsActive = false;
+            Active.LastActiveUtc = DateTime.UtcNow; // idle clock starts when you leave a tab
+            if (Active.View != null)
+            {
+                Active.View.Visibility = Visibility.Collapsed;
+                Active.State = TabState.Background;
+            }
+        }
+
+        Active = tab;
+        tab.IsActive = true;
+        tab.LastActiveUtc = DateTime.UtcNow;
+
+        await EnsureViewAsync(tab);
+        if (tab.View != null)
+            tab.View.Visibility = Visibility.Visible; // becoming visible auto-resumes a suspended tab
+        tab.State = TabState.Active;
+
+        ActiveTabUpdated?.Invoke();
+    }
+
+    public void CloseTab(BrowserTab tab)
+    {
+        int idx = Tabs.IndexOf(tab);
+        if (idx < 0) return;
+
+        PushClosed(tab);
+        DestroyView(tab);
+        Tabs.Remove(tab);
+
+        if (Active == tab)
+        {
+            Active = null;
+            if (Tabs.Count > 0)
+                _ = ActivateAsync(Tabs[Math.Min(idx, Tabs.Count - 1)]);
+            else
+                _ = NewTabAsync(NewTabUrl, true);
+        }
+    }
+
+    public void NextTab()
+    {
+        if (Tabs.Count < 2 || Active == null) return;
+        int i = (Tabs.IndexOf(Active) + 1) % Tabs.Count;
+        _ = ActivateAsync(Tabs[i]);
+    }
+
+    // ---- navigation on the active tab ------------------------------------------------
+
+    public async Task NavigateActiveAsync(string text)
+    {
+        if (Active == null)
+            await NewTabAsync(NewTabUrl, true);
+        await EnsureViewAsync(Active!);
+        Active!.View!.CoreWebView2.Navigate(AddressBar.Resolve(text, _settings));
+    }
+
+    public void GoBack()
+    {
+        var cw = Active?.View?.CoreWebView2;
+        if (cw != null && cw.CanGoBack) cw.GoBack();
+    }
+
+    public void GoForward()
+    {
+        var cw = Active?.View?.CoreWebView2;
+        if (cw != null && cw.CanGoForward) cw.GoForward();
+    }
+
+    public void Reload() => Active?.View?.CoreWebView2?.Reload();
+
+    // ---- tab operations --------------------------------------------------------------
+
+    private void PushClosed(BrowserTab tab)
+    {
+        if (string.IsNullOrEmpty(tab.Url) ||
+            tab.Url.StartsWith("https://wisp.newtab", StringComparison.OrdinalIgnoreCase)) return;
+        _closed.Add(new SessionTab { Url = tab.Url, Title = tab.Title });
+        if (_closed.Count > 25) _closed.RemoveAt(0);
+    }
+
+    public async Task ReopenClosedAsync()
+    {
+        if (_closed.Count == 0) return;
+        var st = _closed[^1];
+        _closed.RemoveAt(_closed.Count - 1);
+        await NewTabAsync(st.Url, true);
+    }
+
+    public void TogglePin(BrowserTab tab)
+    {
+        tab.IsPinned = !tab.IsPinned;
+        ReorderPinned();
+    }
+
+    /// <summary>Keeps pinned tabs grouped at the left, preserving relative order.</summary>
+    private void ReorderPinned()
+    {
+        var ordered = Tabs.OrderBy(t => t.IsPinned ? 0 : 1).ToList();
+        for (int i = 0; i < ordered.Count; i++)
+        {
+            int cur = Tabs.IndexOf(ordered[i]);
+            if (cur != i) Tabs.Move(cur, i);
+        }
+    }
+
+    /// <summary>Freezes the foreground tab too (used when the window is minimized) so Wisp's
+    /// memory drops while you're not looking at it.</summary>
+    public async Task SuspendActiveAsync()
+    {
+        var t = Active;
+        if (t?.View?.CoreWebView2 == null) return;
+        t.View.Visibility = Visibility.Collapsed; // required before suspend
+        try { await t.View.CoreWebView2.TrySuspendAsync(); } catch { }
+    }
+
+    public void ResumeActive()
+    {
+        if (Active?.View != null) Active.View.Visibility = Visibility.Visible; // auto-resumes
+    }
+
+    public void ToggleMute(BrowserTab tab)
+    {
+        var cw = tab.View?.CoreWebView2;
+        if (cw == null) return;
+        cw.IsMuted = !cw.IsMuted;
+        tab.IsMuted = cw.IsMuted;
+    }
+
+    public async Task DuplicateAsync(BrowserTab tab) => await NewTabAsync(tab.Url, true);
+
+    /// <summary>Opens a new tab showing raw HTML (used by reader mode).</summary>
+    public async Task<BrowserTab> OpenHtmlTabAsync(string html, string title)
+    {
+        var tab = new BrowserTab { Url = NewTabUrl, Title = title, State = TabState.Discarded };
+        Tabs.Add(tab);
+        await ActivateAsync(tab);
+        tab.View!.CoreWebView2.NavigateToString(html);
+        tab.Title = title;
+        return tab;
+    }
+
+    public void CloseOthers(BrowserTab keep)
+    {
+        foreach (var t in Tabs.ToArray())
+            if (t != keep && !t.IsPinned) CloseTab(t);
+    }
+
+    public void CloseToRight(BrowserTab from)
+    {
+        int idx = Tabs.IndexOf(from);
+        if (idx < 0) return;
+        foreach (var t in Tabs.Skip(idx + 1).ToArray())
+            if (!t.IsPinned) CloseTab(t);
+    }
+
+    /// <summary>Moves a tab to a new index (used by drag-to-reorder), staying within its
+    /// pinned/unpinned group.</summary>
+    public void MoveTab(BrowserTab tab, int newIndex)
+    {
+        int cur = Tabs.IndexOf(tab);
+        if (cur < 0) return;
+        newIndex = Math.Clamp(newIndex, 0, Tabs.Count - 1);
+        if (cur != newIndex) Tabs.Move(cur, newIndex);
+        ReorderPinned();
+    }
+
+    // ---- zoom ------------------------------------------------------------------------
+
+    public double ActiveZoom => Active?.View?.ZoomFactor ?? 1.0;
+
+    public void SetZoom(double factor)
+    {
+        var v = Active?.View;
+        if (v == null) return;
+        v.ZoomFactor = Math.Clamp(factor, 0.25, 5.0);
+        ActiveTabUpdated?.Invoke();
+    }
+
+    public void ZoomIn() => SetZoom(RoundStep(ActiveZoom + 0.1));
+    public void ZoomOut() => SetZoom(RoundStep(ActiveZoom - 0.1));
+    public void ZoomReset() => SetZoom(1.0);
+    private static double RoundStep(double z) => Math.Round(z * 10) / 10.0;
+
+    // ---- memory management (driven by SleepManager) ---------------------------------
+
+    /// <summary>Freezes a hidden background tab's renderer to reclaim memory. The tab
+    /// auto-resumes when it becomes visible again.</summary>
+    public async Task<bool> TrySuspendTabAsync(BrowserTab tab)
+    {
+        if (tab == Active || tab.View?.CoreWebView2 == null || tab.State == TabState.Suspended)
+            return false;
+        if (tab.View.Visibility == Visibility.Visible) return false; // never sleep an on-screen tab
+        try
+        {
+            bool ok = await tab.View.CoreWebView2.TrySuspendAsync();
+            if (ok) tab.State = TabState.Suspended;
+            return ok;
+        }
+        catch { return false; } // still visible / busy — retried next tick
+    }
+
+    /// <summary>Tears down a long-idle tab's renderer entirely. Its URL is kept so the
+    /// page is recreated and reloaded the next time the tab is activated.</summary>
+    public void DiscardTab(BrowserTab tab)
+    {
+        if (tab == Active || tab.View == null) return;
+        if (tab.View.Visibility == Visibility.Visible) return; // never discard an on-screen tab
+        DestroyView(tab);
+        tab.State = TabState.Discarded;
+    }
+
+    /// <summary>Opens a tab whose page loads immediately but stays in the background.</summary>
+    public async Task<BrowserTab> OpenBackgroundLoadedTabAsync(string url)
+    {
+        var tab = new BrowserTab { Url = url, Title = "New Tab", State = TabState.Background };
+        Tabs.Add(tab);
+        await EnsureViewAsync(tab);
+        tab.LastActiveUtc = DateTime.UtcNow;
+        return tab;
+    }
+
+    // ---- WebView2 lifecycle ----------------------------------------------------------
+
+    private async Task EnsureViewAsync(BrowserTab tab)
+    {
+        if (tab.View != null) return;
+
+        var view = new WebView2 { Visibility = Visibility.Collapsed };
+        _host.Children.Add(view);
+        tab.View = view;
+
+        await view.EnsureCoreWebView2Async(_env.Core);
+        var cw = view.CoreWebView2;
+
+        cw.Settings.IsReputationCheckingRequired = false; // no SmartScreen URL calls
+        cw.Profile.PreferredColorScheme = CoreWebView2PreferredColorScheme.Dark;
+
+        // Serve the local new-tab page from the bundled Resources folder.
+        try
+        {
+            cw.SetVirtualHostNameToFolderMapping(
+                NewTabHost,
+                Path.Combine(AppContext.BaseDirectory, "Resources"),
+                CoreWebView2HostResourceAccessKind.Allow);
+        }
+        catch { }
+
+        cw.ProcessFailed += (_, e) =>
+        {
+            // If a tab's renderer dies or hangs, reload it rather than leaving a blank page.
+            if (e.ProcessFailedKind is CoreWebView2ProcessFailedKind.RenderProcessExited
+                or CoreWebView2ProcessFailedKind.RenderProcessUnresponsive)
+            {
+                try { cw.Reload(); } catch { }
+            }
+        };
+
+        cw.FaviconChanged += async (_, _) => await LoadFaviconAsync(tab, cw);
+
+        // Web-initiated fullscreen (e.g. a YouTube video's fullscreen button).
+        cw.ContainsFullScreenElementChanged += (_, _) =>
+        {
+            if (tab == Active) FullScreenChanged?.Invoke(cw.ContainsFullScreenElement);
+        };
+
+        // Native ad/tracker blocking — block requests to known ad domains at the network level.
+        cw.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.All);
+        cw.WebResourceRequested += (_, e) =>
+        {
+            try
+            {
+                var reqHost = new Uri(e.Request.Uri).Host;
+                string pageHost = ""; try { pageHost = new Uri(cw.Source).Host; } catch { }
+                if (AdBlockEngine.ShouldBlock(reqHost, pageHost))
+                {
+                    tab.BlockedCount++;
+                    AdBlockEngine.OnBlocked("");
+                    e.Response = _env.Core.CreateWebResourceResponse(null, 204, "No Content", "");
+                }
+            }
+            catch { }
+        };
+
+        cw.IsDocumentPlayingAudioChanged += (_, _) => tab.IsPlayingAudio = cw.IsDocumentPlayingAudio;
+        cw.IsMutedChanged += (_, _) => tab.IsMuted = cw.IsMuted;
+        if (tab.IsMuted) cw.IsMuted = true; // restore mute after a discard/recreate
+
+        cw.DownloadStarting += (_, e) =>
+        {
+            e.Handled = true; // suppress the default download bar; we show our own panel
+            DownloadStarted?.Invoke(e.DownloadOperation);
+        };
+
+        await AdBlock.EnsureRemovedAsync(cw, _settings); // uninstall the old bundled uBO Lite, once
+
+        cw.DocumentTitleChanged += (_, _) =>
+        {
+            tab.Title = string.IsNullOrWhiteSpace(cw.DocumentTitle) ? HostOf(cw.Source) : cw.DocumentTitle;
+            PageVisited?.Invoke(cw.Source, cw.DocumentTitle);
+            if (tab == Active) ActiveTabUpdated?.Invoke();
+        };
+        cw.SourceChanged += (_, _) =>
+        {
+            tab.BlockedCount = 0; // fresh page — reset the per-site block tally
+            tab.Url = cw.Source;
+            PageVisited?.Invoke(cw.Source, tab.Title);
+            if (tab == Active) ActiveTabUpdated?.Invoke();
+        };
+        cw.HistoryChanged += (_, _) =>
+        {
+            if (tab == Active) ActiveTabUpdated?.Invoke();
+        };
+        cw.NewWindowRequested += (_, e) =>
+        {
+            var f = e.WindowFeatures;
+            bool isPopup = f != null && (f.HasSize || f.HasPosition);
+            if (isPopup)
+            {
+                // Real popup (e.g. Google/Claude OAuth sign-in) — needs window.opener preserved,
+                // so give it an actual popup window instead of a tab.
+                var deferral = e.GetDeferral();
+                _ = OpenPopupWindowAsync(e, deferral);
+            }
+            else
+            {
+                e.Handled = true; // a plain new window / target=_blank — open as a tab
+                _ = NewTabAsync(e.Uri, true);
+            }
+        };
+        cw.WebMessageReceived += (_, e) =>
+        {
+            string? msg = null;
+            try { msg = e.TryGetWebMessageAsString(); } catch { /* non-string message */ }
+            if (msg is { } m && m.StartsWith("wisp:", StringComparison.Ordinal))
+                AcceleratorRequested?.Invoke(m.Substring(5));
+        };
+
+        // Shortcuts must also work while web content has focus. The WPF wrapper doesn't
+        // surface AcceleratorKeyPressed, so we capture the keys in-page and post them back.
+        await cw.AddScriptToExecuteOnDocumentCreatedAsync(AcceleratorScript);
+        // Adds an "Add to Wisp" button on Chrome Web Store detail pages.
+        await cw.AddScriptToExecuteOnDocumentCreatedAsync(StoreButtonScript);
+
+        cw.Navigate(string.IsNullOrEmpty(tab.Url) ? NewTabUrl : tab.Url);
+    }
+
+    private void DestroyView(BrowserTab tab)
+    {
+        if (tab.View == null) return;
+        _host.Children.Remove(tab.View);
+        tab.View.Dispose();
+        tab.View = null;
+    }
+
+    /// <summary>Hosts a real browser popup (OAuth sign-in windows) so window.opener works.</summary>
+    private async Task OpenPopupWindowAsync(CoreWebView2NewWindowRequestedEventArgs e, CoreWebView2Deferral deferral)
+    {
+        try
+        {
+            var f = e.WindowFeatures;
+            double w = (f != null && f.HasSize && f.Width > 100) ? f.Width : 480;
+            double h = (f != null && f.HasSize && f.Height > 100) ? f.Height : 640;
+
+            var wv = new WebView2();
+            var win = new Window
+            {
+                Title = "Wisp", Width = w, Height = h, Content = wv,
+                WindowStartupLocation = WindowStartupLocation.CenterScreen,
+                Background = System.Windows.Media.Brushes.Black,
+            };
+            win.Show(); // show first so the WebView2 has a window to initialize into
+            await wv.EnsureCoreWebView2Async(_env.Core);
+
+            var pcw = wv.CoreWebView2;
+            pcw.Settings.IsReputationCheckingRequired = false;
+            pcw.WindowCloseRequested += (_, _) => { try { win.Close(); } catch { } };
+
+            e.NewWindow = pcw;
+            deferral.Complete();
+        }
+        catch
+        {
+            e.Handled = true;
+            deferral.Complete();
+            _ = NewTabAsync(e.Uri, true);
+        }
+    }
+
+    private static string HostOf(string url)
+    {
+        try { return new Uri(url).Host is { Length: > 0 } h ? h : url; }
+        catch { return url; }
+    }
+
+    private static async Task LoadFaviconAsync(BrowserTab tab, CoreWebView2 cw)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(cw.FaviconUri)) { tab.Favicon = null; return; }
+
+            using var src = await cw.GetFaviconAsync(CoreWebView2FaviconImageFormat.Png);
+            if (src == null) return;
+
+            using var ms = new MemoryStream();
+            await src.CopyToAsync(ms);
+            ms.Position = 0;
+
+            var bmp = new BitmapImage();
+            bmp.BeginInit();
+            bmp.CacheOption = BitmapCacheOption.OnLoad;
+            bmp.DecodePixelWidth = 32;
+            bmp.StreamSource = ms;
+            bmp.EndInit();
+            bmp.Freeze();
+            tab.Favicon = bmp;
+        }
+        catch { /* favicon is best-effort */ }
+    }
+
+    /// <summary>Injected into every page: turns browser shortcuts into host messages.</summary>
+    private const string AcceleratorScript = @"
+(function () {
+  window.addEventListener('keydown', function (e) {
+    if (!e.isTrusted) return;
+    var cmd = null;
+    if (e.key === 'F11') cmd = 'fullscreen';
+    else if (e.ctrlKey && !e.altKey && !e.metaKey) {
+      var k = (e.key || '').toLowerCase();
+      if (k === 't') cmd = 'newtab';
+      else if (k === 'w') cmd = 'closetab';
+      else if (k === 'l') cmd = 'focusaddress';
+      else if (k === 'r') cmd = 'reload';
+      else if (k === 'f') cmd = 'find';
+      else if (k === 'd') cmd = 'bookmark';
+      else if (e.code === 'Tab') cmd = 'nexttab';
+    } else if (e.altKey && !e.ctrlKey) {
+      if (e.code === 'ArrowLeft') cmd = 'back';
+      else if (e.code === 'ArrowRight') cmd = 'forward';
+    }
+    if (cmd) { e.preventDefault(); e.stopPropagation(); window.chrome.webview.postMessage('wisp:' + cmd); }
+  }, true);
+})();";
+
+    /// <summary>Injected on Chrome Web Store pages: replaces the store's "Add to Chrome"
+    /// button with our own "Add to Wisp" (falls back to a floating button if not found).</summary>
+    private const string StoreButtonScript = @"
+(function () {
+  if (!/chromewebstore\.google\.com/.test(location.host) && !/^\/webstore\//.test(location.pathname)) return;
+  var state = 'idle'; // idle | installing | done
+  function extId() {
+    var m = location.pathname.match(/\/detail\/(?:[^\/]+\/)?([a-p]{32})/);
+    return m ? m[1] : null;
+  }
+  function label() {
+    return state === 'installing' ? 'Installing...' : state === 'done' ? 'Added to Wisp' : '+  Add to Wisp';
+  }
+  function apply() {
+    var bs = document.querySelectorAll('.wisp-add-btn');
+    for (var i = 0; i < bs.length; i++) { bs[i].textContent = label(); bs[i].disabled = (state === 'installing'); }
+  }
+  function onClick(id) {
+    return function (e) {
+      if (e) { e.preventDefault(); e.stopPropagation(); }
+      state = 'installing'; apply();
+      window.chrome.webview.postMessage('wisp:install:' + id);
+    };
+  }
+  function storeButtons() {
+    var out = [], els = document.querySelectorAll('button, a[role=button]');
+    for (var i = 0; i < els.length; i++) {
+      var el = els[i];
+      if (el.classList.contains('wisp-add-btn')) continue;
+      if (/^Add to Chrome/i.test((el.textContent || '').trim()) && el.offsetParent !== null) out.push(el);
+    }
+    return out;
+  }
+  function sync() {
+    if (!document.body) return;
+    var id = extId();
+    if (!id) {
+      var o = document.querySelectorAll('.wisp-add-btn'); for (var i = 0; i < o.length; i++) o[i].remove();
+      var h = document.querySelectorAll('[data-wisp-hidden]'); for (var j = 0; j < h.length; j++) { h[j].style.display = ''; h[j].removeAttribute('data-wisp-hidden'); }
+      state = 'idle'; return;
+    }
+    var sbs = storeButtons();
+    for (var k = 0; k < sbs.length; k++) {
+      var sb = sbs[k];
+      sb.setAttribute('data-wisp-hidden', '1');
+      sb.style.display = 'none';
+      var clone = sb.cloneNode(true);
+      clone.classList.add('wisp-add-btn');
+      clone.removeAttribute('data-wisp-hidden');
+      clone.style.display = '';
+      clone.onclick = onClick(id);
+      sb.parentNode.insertBefore(clone, sb);
+    }
+    if (sbs.length > 0) { var fl = document.getElementById('wisp-float'); if (fl) fl.remove(); }
+    if (!document.querySelector('.wisp-add-btn')) {
+      var f = document.createElement('button');
+      f.id = 'wisp-float';
+      f.className = 'wisp-add-btn';
+      f.style.cssText = 'position:fixed;top:14px;right:16px;z-index:2147483647;background:#4c8dff;color:#fff;border:none;border-radius:10px;padding:10px 16px;font:600 14px sans-serif;box-shadow:0 6px 18px rgba(0,0,0,.45);cursor:pointer';
+      f.onclick = onClick(id);
+      document.body.appendChild(f);
+    }
+    apply();
+  }
+  if (window.chrome && window.chrome.webview) {
+    window.chrome.webview.addEventListener('message', function (ev) {
+      if (typeof ev.data !== 'string' || ev.data.indexOf('wisp:installed:') !== 0) return;
+      state = (ev.data.substring(15) === 'ok') ? 'done' : 'idle';
+      apply();
+    });
+  }
+  sync();
+  setInterval(sync, 1000);
+})();";
+}

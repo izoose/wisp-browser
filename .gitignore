@@ -1,0 +1,24 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+dist/
+publish/
+*.user
+
+# Visual Studio / Rider
+.vs/
+.idea/
+*.suo
+*.userprefs
+
+# NuGet
+*.nupkg
+packages/
+
+# OS cruft
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Local runtime data (should never be committed)
+*.log

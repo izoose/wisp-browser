@@ -1,0 +1,44 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>New Tab</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { height: 100%; margin: 0; background: #1b1b1d; color: #ededed;
+    font-family: "Segoe UI", system-ui, sans-serif; }
+  .wrap { height: 100%; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 30px; }
+  .logo { font-size: 46px; font-weight: 600; letter-spacing: 1px; opacity: .92; }
+  .logo b { color: #4c8dff; font-weight: 600; }
+  form { width: min(560px, 78vw); }
+  input { width: 100%; box-sizing: border-box; padding: 15px 18px; font-size: 16px;
+    background: #37373d; color: #ededed; border: 1px solid #3a3a40;
+    border-radius: 12px; outline: none; }
+  input::placeholder { color: #8a8a92; }
+  input:focus { border-color: #4c8dff; }
+  .hint { color: #7c7c85; font-size: 12.5px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="logo">wisp<b>.</b></div>
+    <form id="f">
+      <input id="q" autofocus spellcheck="false" autocomplete="off"
+             placeholder="Search or enter address">
+    </form>
+    <div class="hint">Ctrl+T new tab &middot; Ctrl+L address bar &middot; Ctrl+F find in page</div>
+  </div>
+  <script>
+    var q = document.getElementById("q");
+    q.focus();
+    document.getElementById("f").addEventListener("submit", function (e) {
+      e.preventDefault();
+      var v = q.value.trim();
+      if (v && window.chrome && window.chrome.webview) {
+        window.chrome.webview.postMessage("wisp:navigate:" + encodeURIComponent(v));
+      }
+    });
+  </script>
+</body>
+</html>

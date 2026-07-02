@@ -1,0 +1,161 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Settings</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #1b1b1d; color: #e6e6e6;
+    font-family: "Segoe UI", system-ui, sans-serif; }
+  .top { position: sticky; top: 0; background: #1b1b1d; z-index: 2;
+    border-bottom: 1px solid #2f2f36; }
+  .top .wrap { display: flex; align-items: center; gap: 14px; padding: 22px 24px; }
+  .logo { font-size: 22px; font-weight: 600; opacity: .95; }
+  .logo b { color: #4c8dff; }
+  h1 { font-size: 22px; font-weight: 600; margin: 0; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 0 24px; }
+  .card { background: #232327; border: 1px solid #2f2f36; border-radius: 14px;
+    margin: 22px 0; overflow: hidden; }
+  .card h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .6px;
+    color: #8a8a92; margin: 0; padding: 18px 20px 6px; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    padding: 16px 20px; border-top: 1px solid #2a2a30; }
+  .row.first { border-top: none; }
+  .label { font-size: 15px; }
+  .sub { font-size: 12.5px; color: #8a8a92; margin-top: 3px; }
+  .switch { position: relative; width: 44px; height: 24px; flex: none; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider { position: absolute; inset: 0; background: #3a3a42; border-radius: 999px;
+    transition: .15s; cursor: pointer; }
+  .slider:before { content: ''; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px;
+    background: #fff; border-radius: 50%; transition: .15s; }
+  .switch input:checked + .slider { background: #4c8dff; }
+  .switch input:checked + .slider:before { transform: translateX(20px); }
+  .pills { display: flex; gap: 8px; flex-wrap: wrap; padding: 8px 20px 18px; }
+  .pill { padding: 8px 16px; border-radius: 999px; border: 1px solid #3a3a42;
+    background: #26262b; color: #cfcfd6; cursor: pointer; font-size: 14px; user-select: none; }
+  .pill.active { background: #4c8dff; border-color: #4c8dff; color: #fff; }
+  input.num { width: 84px; background: #37373d; border: 1px solid #3a3a42; border-radius: 8px;
+    color: #e6e6e6; padding: 8px 10px; font-size: 14px; text-align: center; }
+  .unit { color: #8a8a92; font-size: 13px; margin-left: 8px; }
+  .btn { padding: 9px 16px; border-radius: 8px; border: 1px solid #3a3a42; background: #2c2c32;
+    color: #e6e6e6; cursor: pointer; font-size: 14px; }
+  .btn.danger { border-color: #5a2b2b; color: #ff8a8a; }
+  .btn.danger:hover { background: #3a2020; }
+  .foot { color: #6f6f78; font-size: 12px; padding: 8px 4px 60px; }
+</style>
+</head>
+<body>
+  <div class="top"><div class="wrap"><span class="logo">wisp<b>.</b></span><h1>Settings</h1></div></div>
+  <div class="wrap">
+
+    <div class="card">
+      <h2>Get started</h2>
+      <div class="row first"><div><div class="label">Import from another browser</div>
+        <div class="sub">Bring cookies &amp; logins, bookmarks, and history from Brave, Chrome, or Edge</div></div>
+        <button class="btn" id="import">Import…</button></div>
+    </div>
+
+    <div class="card">
+      <h2>Search</h2>
+      <div class="row first"><div><div class="label">Default search engine</div>
+        <div class="sub">Used when you type words instead of a URL</div></div></div>
+      <div class="pills" id="engines"></div>
+    </div>
+
+    <div class="card">
+      <h2>Appearance</h2>
+      <div class="row first"><div><div class="label">Force dark on all sites</div>
+        <div class="sub">Darkens sites that don't offer a dark theme &middot; applies after restart</div></div>
+        <label class="switch"><input type="checkbox" id="forceDark"><span class="slider"></span></label></div>
+      <div class="row"><div><div class="label">Show bookmarks bar</div>
+        <div class="sub">Ctrl+Shift+B</div></div>
+        <label class="switch"><input type="checkbox" id="bookmarksBar"><span class="slider"></span></label></div>
+      <div class="row"><div><div class="label">Type in the address bar on new tab</div>
+        <div class="sub">Otherwise the cursor starts in the new-tab page's search box</div></div>
+        <label class="switch"><input type="checkbox" id="focusAddress"><span class="slider"></span></label></div>
+    </div>
+
+    <div class="card">
+      <h2>Performance</h2>
+      <div class="row first"><div><div class="label">Sleep background tabs after</div>
+        <div class="sub">Freezes the tab to free memory; wakes instantly on click</div></div>
+        <div><input class="num" id="suspendMin" type="number" min="1"><span class="unit">min</span></div></div>
+      <div class="row"><div><div class="label">Discard sleeping tabs after</div>
+        <div class="sub">Fully unloads the tab; reloads when you return to it</div></div>
+        <div><input class="num" id="discardMin" type="number" min="1"><span class="unit">min</span></div></div>
+      <div class="row"><div><div class="label">Memory saver</div>
+        <div class="sub">Shares processes across sites for lower RAM &middot; slightly weaker isolation &middot; applies after restart</div></div>
+        <label class="switch"><input type="checkbox" id="memorySaver"><span class="slider"></span></label></div>
+    </div>
+
+    <div class="card">
+      <h2>Privacy</h2>
+      <div class="row first"><div><div class="label">Block ads &amp; trackers</div>
+        <div class="sub">Wisp's built-in network blocker &middot; turn off if a site misbehaves</div></div>
+        <label class="switch"><input type="checkbox" id="adBlock"><span class="slider"></span></label></div>
+      <div class="row"><div><div class="label">Clear browsing data</div>
+        <div class="sub">History, cookies, and cache</div></div>
+        <button class="btn danger" id="clear">Clear data</button></div>
+    </div>
+
+    <div class="foot">Wisp — a lightweight, dark browser.</div>
+  </div>
+
+<script>
+  var ENGINES = ['Google', 'DuckDuckGo', 'Brave Search', 'Bing'];
+  var state = { searchEngine: 'Google', forceDark: false, adBlock: true, bookmarksBar: false, focusAddress: false, memorySaver: false, suspendMin: 5, discardMin: 30 };
+
+  function send() {
+    if (window.chrome && window.chrome.webview)
+      window.chrome.webview.postMessage('wisp:settings:set:' + JSON.stringify(state));
+  }
+  function renderEngines() {
+    var c = document.getElementById('engines'); c.innerHTML = '';
+    ENGINES.forEach(function (e) {
+      var b = document.createElement('div');
+      b.className = 'pill' + (state.searchEngine === e ? ' active' : '');
+      b.textContent = e;
+      b.onclick = function () { state.searchEngine = e; renderEngines(); send(); };
+      c.appendChild(b);
+    });
+  }
+  function apply() {
+    document.getElementById('forceDark').checked = !!state.forceDark;
+    document.getElementById('adBlock').checked = !!state.adBlock;
+    document.getElementById('bookmarksBar').checked = !!state.bookmarksBar;
+    document.getElementById('focusAddress').checked = !!state.focusAddress;
+    document.getElementById('memorySaver').checked = !!state.memorySaver;
+    document.getElementById('suspendMin').value = state.suspendMin;
+    document.getElementById('discardMin').value = state.discardMin;
+    renderEngines();
+  }
+  document.getElementById('forceDark').onchange = function () { state.forceDark = this.checked; send(); };
+  document.getElementById('adBlock').onchange = function () { state.adBlock = this.checked; send(); };
+  document.getElementById('bookmarksBar').onchange = function () { state.bookmarksBar = this.checked; send(); };
+  document.getElementById('focusAddress').onchange = function () { state.focusAddress = this.checked; send(); };
+  document.getElementById('memorySaver').onchange = function () { state.memorySaver = this.checked; send(); };
+  document.getElementById('suspendMin').onchange = function () { var v = parseInt(this.value); if (v > 0) { state.suspendMin = v; send(); } };
+  document.getElementById('discardMin').onchange = function () { var v = parseInt(this.value); if (v > 0) { state.discardMin = v; send(); } };
+  document.getElementById('clear').onclick = function () {
+    if (window.chrome && window.chrome.webview) window.chrome.webview.postMessage('wisp:settings:clear');
+    var b = this; b.textContent = 'Cleared'; setTimeout(function () { b.textContent = 'Clear data'; }, 1500);
+  };
+  document.getElementById('import').onclick = function () {
+    if (window.chrome && window.chrome.webview) window.chrome.webview.postMessage('wisp:settings:import');
+  };
+
+  if (window.chrome && window.chrome.webview) {
+    window.chrome.webview.addEventListener('message', function (ev) {
+      if (typeof ev.data !== 'string') return;
+      if (ev.data.indexOf('wisp:settings:data:') === 0) {
+        try { state = JSON.parse(ev.data.substring(19)); apply(); } catch (e) { }
+      }
+    });
+    window.chrome.webview.postMessage('wisp:settings:get');
+  }
+  apply();
+</script>
+</body>
+</html>
