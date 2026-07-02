@@ -59,6 +59,7 @@ public partial class MainWindow : Window
         _tabs.PageVisited += (url, title) => { if (!_isPrivate) _history.Record(url, title); };
         _tabs.DownloadStarted += OnDownloadStarted;
         _tabs.FullScreenChanged += on => SetFullscreen(on, fromWeb: true);
+        _tabs.ScriptDialogRequested += OnScriptDialog;
         _tabs.Tabs.CollectionChanged += (_, _) => { RelayoutTabs(); ScheduleSessionSave(); };
         _find.CountChanged += OnFindCountChanged;
         DataContext = _tabs;
@@ -145,6 +146,14 @@ public partial class MainWindow : Window
             }
 
             await MaybeOfferImportAsync();
+
+            // Quietly check for a newer release a few seconds after launch.
+            if (!_isPrivate && _settings.AutoUpdateCheck
+                && Environment.GetEnvironmentVariable("WISP_NO_FIRSTRUN") != "1")
+            {
+                await Task.Delay(4000);
+                await CheckForUpdatesAsync(manual: false);
+            }
         };
 
         Closed += (_, _) =>
@@ -1349,6 +1358,39 @@ public partial class MainWindow : Window
         UpdateShield();
     }
 
+    // ---- auto-update -----------------------------------------------------------------
+
+    private Updater.UpdateInfo? _pendingUpdate;
+
+    /// <summary>Checks GitHub for a newer release. On startup this is silent unless one is found;
+    /// invoked from the menu it reports "up to date" too.</summary>
+    private async Task CheckForUpdatesAsync(bool manual)
+    {
+        if (_isPrivate) return;
+        if (manual) ShowToast("Checking for updates…");
+        var info = await Updater.CheckAsync();
+        if (info == null)
+        {
+            if (manual) ShowToast($"You're up to date — Wisp {Updater.Current.ToString(3)}");
+            return;
+        }
+        _pendingUpdate = info;
+        UpdateMsg.Text = $"Wisp {info.Version.ToString(3)} is ready to install. You have {Updater.Current.ToString(3)}.";
+        UpdatePopup.IsOpen = true;
+    }
+
+    private async void UpdateNow_Click(object sender, RoutedEventArgs e)
+    {
+        UpdatePopup.IsOpen = false;
+        if (_pendingUpdate == null) return;
+        ShowToast("Downloading update — Wisp will restart to finish…");
+        bool ok = await Updater.DownloadAndRunAsync(_pendingUpdate.SetupUrl);
+        if (!ok) ShowToast("Couldn't download the update — try again later");
+        // On success the installer closes and relaunches Wisp itself.
+    }
+
+    private void UpdateLater_Click(object sender, RoutedEventArgs e) => UpdatePopup.IsOpen = false;
+
     /// <summary>Detects installed Chromium browsers and imports the user's chosen data from one.</summary>
     private async Task StartImportAsync()
     {
@@ -1541,6 +1583,34 @@ public partial class MainWindow : Window
     private void MenuZoomIn_Click(object sender, RoutedEventArgs e) { _tabs.ZoomIn(); UpdateMenuZoom(); }
     private void MenuZoomOut_Click(object sender, RoutedEventArgs e) { _tabs.ZoomOut(); UpdateMenuZoom(); }
     private void MenuFullscreen_Click(object sender, RoutedEventArgs e) { MenuPopup.IsOpen = false; ToggleFullscreen(); }
+
+    /// <summary>Renders a site's alert()/confirm()/prompt() as a Wisp-styled dialog instead of the
+    /// default gray Edge box. Runs synchronously on the UI thread, which blocks the page script
+    /// until the user responds — the same behaviour as a native dialog.</summary>
+    private void OnScriptDialog(CoreWebView2ScriptDialogOpeningEventArgs e)
+    {
+        string site;
+        try { site = new Uri(e.Uri).Host; } catch { site = e.Uri; }
+        if (string.IsNullOrEmpty(site)) site = "This page";
+
+        switch (e.Kind)
+        {
+            case CoreWebView2ScriptDialogKind.Alert:
+                PromptDialog.Alert(this, site, e.Message);
+                break;
+            case CoreWebView2ScriptDialogKind.Confirm:
+                if (PromptDialog.Confirm(this, site, e.Message)) e.Accept();
+                break;
+            case CoreWebView2ScriptDialogKind.Beforeunload:
+                if (PromptDialog.Confirm(this, site, string.IsNullOrWhiteSpace(e.Message)
+                        ? "Leave this site? Changes you made may not be saved." : e.Message)) e.Accept();
+                break;
+            case CoreWebView2ScriptDialogKind.Prompt:
+                var r = PromptDialog.PromptWeb(this, site, e.Message, e.DefaultText);
+                if (r != null) { e.ResultText = r; e.Accept(); }
+                break;
+        }
+    }
 
     /// <summary>Injects Google's page-translate widget and translates the current page to English.</summary>
     private void TranslatePage()
@@ -1885,6 +1955,7 @@ public partial class MainWindow : Window
             case "search": CycleSearchEngine(); break;
             case "sleepnow": MenuPopup.IsOpen = false; await SleepNowAsync(); break;
             case "import": MenuPopup.IsOpen = false; await StartImportAsync(); break;
+            case "update": MenuPopup.IsOpen = false; await CheckForUpdatesAsync(manual: true); break;
             case "default": MenuPopup.IsOpen = false; MakeDefaultBrowser(); break;
         }
     }
@@ -2077,30 +2148,65 @@ public partial class MainWindow : Window
 
     private void HandleNewTabMessage(string rest)
     {
-        if (rest != "get") return;
         var cw = _tabs.Active?.View?.CoreWebView2;
-        cw?.PostWebMessageAsString("wisp:newtab:data:" + TopSitesJson());
+        if (rest == "get")
+        {
+            cw?.PostWebMessageAsString("wisp:newtab:data:" + ShortcutsJson());
+        }
+        else if (rest.StartsWith("add:", StringComparison.Ordinal))
+        {
+            var payload = Uri.UnescapeDataString(rest.Substring(4));
+            var parts = payload.Split('\n', 2);
+            if (parts.Length == 2) AddShortcut(parts[1].Trim(), parts[0].Trim());
+            else AddShortcut(payload.Trim(), null);
+            cw?.PostWebMessageAsString("wisp:newtab:data:" + ShortcutsJson());
+        }
+        else if (rest.StartsWith("remove:", StringComparison.Ordinal))
+        {
+            var url = Uri.UnescapeDataString(rest.Substring(7));
+            _settings.NewTabShortcuts?.RemoveAll(s => s.Url == url);
+            _settings.Save();
+            cw?.PostWebMessageAsString("wisp:newtab:data:" + ShortcutsJson());
+        }
     }
 
-    /// <summary>Most-visited sites (by host) for the new-tab shortcuts.</summary>
-    private string TopSitesJson()
+    /// <summary>The new-tab tiles: the user's own list, seeded from top history sites on first use.</summary>
+    private string ShortcutsJson()
     {
-        var top = _history.Items
-            .Where(h => h.Url.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-            .Select(h => new { h.Url, h.Title, Host = HostOf(h.Url) })
-            .Where(h => !string.IsNullOrEmpty(h.Host) && !h.Host.Contains("wisp.newtab"))
-            .GroupBy(h => h.Host)
-            .Select(g => new
-            {
-                url = "https://" + g.Key,
-                title = g.Key.StartsWith("www.") ? g.Key.Substring(4) : g.Key,
-                favicon = $"https://www.google.com/s2/favicons?sz=64&domain={g.Key}",
-                count = g.Count(),
-            })
-            .OrderByDescending(x => x.count)
-            .Take(8);
-        return System.Text.Json.JsonSerializer.Serialize(top);
+        if (_settings.NewTabShortcuts == null)
+        {
+            _settings.NewTabShortcuts = TopSites(8);
+            _settings.Save();
+        }
+        var tiles = _settings.NewTabShortcuts.Select(s => new
+        {
+            url = s.Url,
+            title = string.IsNullOrWhiteSpace(s.Title) ? HostForTitle(s.Url) : s.Title,
+            favicon = $"https://www.google.com/s2/favicons?sz=64&domain={HostOf(s.Url)}",
+        });
+        return System.Text.Json.JsonSerializer.Serialize(tiles);
     }
+
+    private void AddShortcut(string url, string? name)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return;
+        if (!url.Contains("://")) url = "https://" + url;
+        _settings.NewTabShortcuts ??= TopSites(8);
+        if (_settings.NewTabShortcuts.Any(s => string.Equals(s.Url, url, StringComparison.OrdinalIgnoreCase))) return;
+        _settings.NewTabShortcuts.Add(new Shortcut { Url = url, Title = string.IsNullOrWhiteSpace(name) ? HostForTitle(url) : name! });
+        _settings.Save();
+    }
+
+    private List<Shortcut> TopSites(int n) =>
+        _history.Items
+            .Where(h => h.Url.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+            .Select(h => HostOf(h.Url))
+            .Where(host => !string.IsNullOrEmpty(host) && !host.Contains("wisp.newtab"))
+            .GroupBy(host => host)
+            .OrderByDescending(g => g.Count())
+            .Take(n)
+            .Select(g => new Shortcut { Url = "https://" + g.Key, Title = g.Key.StartsWith("www.") ? g.Key.Substring(4) : g.Key })
+            .ToList();
 
     // ---- history page ----------------------------------------------------------------
 

@@ -26,6 +26,13 @@ public class SearchKeyword
     };
 }
 
+/// <summary>A new-tab shortcut tile.</summary>
+public class Shortcut
+{
+    public string Title { get; set; } = "";
+    public string Url { get; set; } = "";
+}
+
 public class AppSettings
 {
     public string SearchEngine { get; set; } = "Google";
@@ -63,8 +70,14 @@ public class AppSettings
     /// <summary>Whether we've already offered to import data from another browser (first-run prompt).</summary>
     public bool ImportOffered { get; set; }
 
+    /// <summary>Check GitHub for a newer Wisp release on startup and offer a one-click update.</summary>
+    public bool AutoUpdateCheck { get; set; } = true;
+
     /// <summary>Omnibox keyword shortcuts: type "yt cats" to search YouTube. %s is the query.</summary>
     public System.Collections.Generic.List<SearchKeyword> SearchKeywords { get; set; } = SearchKeyword.Defaults();
+
+    /// <summary>Custom new-tab shortcut tiles. Null until first seeded from history; then user-managed.</summary>
+    public System.Collections.Generic.List<Shortcut>? NewTabShortcuts { get; set; }
 
     public static AppSettings Load()
     {

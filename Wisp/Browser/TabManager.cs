@@ -47,6 +47,9 @@ public class TabManager
     /// <summary>Raised when the active tab's web content enters/exits element fullscreen (e.g. a video).</summary>
     public event Action<bool>? FullScreenChanged;
 
+    /// <summary>Raised when a page calls alert()/confirm()/prompt() so we can show a Wisp-styled dialog.</summary>
+    public event Action<CoreWebView2ScriptDialogOpeningEventArgs>? ScriptDialogRequested;
+
     /// <summary>Recently-closed tabs, for Ctrl+Shift+T. Newest last.</summary>
     private readonly List<SessionTab> _closed = new();
     public bool HasClosedTabs => _closed.Count > 0;
@@ -361,7 +364,9 @@ public class TabManager
         var cw = view.CoreWebView2;
 
         cw.Settings.IsReputationCheckingRequired = false; // no SmartScreen URL calls
+        cw.Settings.AreDefaultScriptDialogsEnabled = false; // we render alert/confirm/prompt ourselves
         cw.Profile.PreferredColorScheme = CoreWebView2PreferredColorScheme.Dark;
+        cw.ScriptDialogOpening += (_, e) => ScriptDialogRequested?.Invoke(e);
 
         // Serve the local new-tab page from the bundled Resources folder.
         try

@@ -414,6 +414,7 @@
                     <Button Content="Sleep background tabs now" Tag="sleepnow" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
                     <Button Content="Import from another browser…" Tag="import" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
                     <Button Content="Set as default browser" Tag="default" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
+                    <Button Content="Check for updates" Tag="update" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
                     <Button Content="Settings" Tag="settings" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
                 </StackPanel>
             </Border>
@@ -449,6 +450,28 @@
                         <TextBlock Text="&#xE9D9;" FontFamily="Segoe MDL2 Assets" FontSize="13"
                                    Foreground="{StaticResource TextDimBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
                         <TextBlock x:Name="TabHoverMem" Foreground="{StaticResource TextDimBrush}" FontSize="12.5" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Popup>
+
+        <!-- Update notification -->
+        <Popup x:Name="UpdatePopup" PlacementTarget="{Binding ElementName=MenuBtn}" Placement="Bottom"
+               HorizontalOffset="-236" AllowsTransparency="True" StaysOpen="False">
+            <Border Background="{StaticResource ChromeBrush}" BorderBrush="{StaticResource AccentBrush}"
+                    BorderThickness="1" CornerRadius="10" Padding="16" Width="292">
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                        <Ellipse Width="8" Height="8" Fill="{StaticResource AccentBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBlock Text="Update available" FontWeight="SemiBold" FontSize="14" Foreground="{StaticResource TextBrush}"/>
+                    </StackPanel>
+                    <TextBlock x:Name="UpdateMsg" FontSize="12.5" Foreground="{StaticResource TextDimBrush}"
+                               Margin="0,6,0,14" TextWrapping="Wrap"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button Content="Later" Click="UpdateLater_Click" Foreground="{StaticResource TextBrush}"
+                                Background="#2A303E" BorderThickness="0" Padding="14,7" Cursor="Hand" Margin="0,0,8,0"/>
+                        <Button x:Name="UpdateNowBtn" Content="Update now" Click="UpdateNow_Click" Foreground="White"
+                                Background="{StaticResource AccentBrush}" BorderThickness="0" Padding="14,7" Cursor="Hand" FontWeight="SemiBold"/>
                     </StackPanel>
                 </StackPanel>
             </Border>

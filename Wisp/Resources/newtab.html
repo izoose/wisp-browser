@@ -2,76 +2,127 @@
 <html>
 <head>
 <meta charset="utf-8">
+<meta name="color-scheme" content="dark">
 <title>New Tab</title>
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; background: #1b1b1d; color: #ededed;
-    font-family: "Segoe UI", system-ui, sans-serif; }
+    font-family: "Segoe UI Variable Text","Segoe UI", system-ui, sans-serif; }
   .wrap { min-height: 100%; display: flex; flex-direction: column;
     align-items: center; justify-content: center; gap: 26px; padding: 40px 20px; }
-  .logo { font-size: 44px; font-weight: 600; letter-spacing: 1px; opacity: .92; }
+  .logo { font-size: 44px; font-weight: 600; letter-spacing: 1px; opacity: .92;
+    font-family: "Segoe UI Variable Display","Segoe UI",sans-serif; }
   .logo b { color: #4c8dff; font-weight: 600; }
-  form { width: min(560px, 80vw); }
-  input { width: 100%; padding: 15px 18px; font-size: 16px;
+  form.search { width: min(560px, 80vw); }
+  input.q { width: 100%; padding: 15px 18px; font-size: 16px;
     background: #37373d; color: #ededed; border: 1px solid #3a3a40;
     border-radius: 12px; outline: none; }
-  input::placeholder { color: #8a8a92; }
-  input:focus { border-color: #4c8dff; }
+  input.q::placeholder { color: #8a8a92; }
+  input.q:focus { border-color: #4c8dff; }
   .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px;
     width: min(560px, 80vw); }
-  .tile { display: flex; flex-direction: column; align-items: center; gap: 8px;
+  @media (max-width: 480px){ .tiles{ grid-template-columns: repeat(3,1fr);} }
+  .tile { position: relative; display: flex; flex-direction: column; align-items: center; gap: 8px;
     padding: 14px 6px; border-radius: 12px; cursor: pointer; text-decoration: none;
     color: #d7d7dd; transition: background .12s; }
   .tile:hover { background: #262629; }
-  .tile .ic { width: 32px; height: 32px; border-radius: 8px; background: #2c2c31;
+  .tile .ic { width: 34px; height: 34px; border-radius: 9px; background: #2c2c31;
     display: flex; align-items: center; justify-content: center; }
   .tile img { width: 20px; height: 20px; }
   .tile span { font-size: 12px; max-width: 100%; overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap; }
+  .tile .x { position: absolute; top: 4px; right: 6px; width: 20px; height: 20px; border: none;
+    border-radius: 50%; background: #3a3a42; color: #cfcfd6; font-size: 12px; cursor: pointer;
+    opacity: 0; transition: opacity .12s; display: flex; align-items: center; justify-content: center; }
+  .tile:hover .x { opacity: 1; } .tile .x:hover { background: #55555f; color: #fff; }
+  .tile.add .ic { background: transparent; border: 1.5px dashed #44444c; color: #8a8a92; font-size: 20px; }
+  .tile.add span { color: #8a8a92; }
   .hint { color: #6f6f78; font-size: 12px; }
+
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none;
+    align-items: center; justify-content: center; }
+  .modal.open { display: flex; }
+  .card { background: #232327; border: 1px solid #34343c; border-radius: 14px; padding: 22px;
+    width: min(380px, 90vw); }
+  .card h3 { margin: 0 0 14px; font-size: 16px; font-weight: 600;
+    font-family: "Segoe UI Variable Display","Segoe UI",sans-serif; }
+  .card input { width: 100%; padding: 10px 12px; font-size: 14px; background: #37373d;
+    color: #ededed; border: 1px solid #3a3a40; border-radius: 9px; outline: none; margin-bottom: 10px; }
+  .card input:focus { border-color: #4c8dff; }
+  .card .row { display: flex; gap: 10px; justify-content: flex-end; margin-top: 6px; }
+  .card button { padding: 9px 16px; border-radius: 9px; border: none; font-size: 14px; cursor: pointer; }
+  .card .cancel { background: #2c2c32; color: #ededed; }
+  .card .ok { background: #4c8dff; color: #fff; font-weight: 600; }
 </style>
 </head>
 <body>
   <div class="wrap">
     <div class="logo">wisp<b>.</b></div>
-    <form id="f">
-      <input id="q" autofocus spellcheck="false" autocomplete="off"
-             placeholder="Search or enter address">
-    </form>
+    <form class="search" id="f"><input class="q" id="q" autofocus spellcheck="false" autocomplete="off" placeholder="Search or enter address"></form>
     <div class="tiles" id="tiles"></div>
-    <div class="hint">Tip: type <b>yt</b>, <b>gh</b>, <b>r</b>… then a query for a quick site search</div>
+    <div class="hint">Hover a shortcut to remove it · Tip: type <b>yt</b>, <b>gh</b>, <b>r</b>… then a query for a quick site search</div>
   </div>
+
+  <div class="modal" id="modal">
+    <div class="card">
+      <h3>Add a shortcut</h3>
+      <input id="mUrl" placeholder="Website (e.g. reddit.com)" spellcheck="false">
+      <input id="mName" placeholder="Name (optional)" spellcheck="false">
+      <div class="row">
+        <button class="cancel" id="mCancel">Cancel</button>
+        <button class="ok" id="mAdd">Add</button>
+      </div>
+    </div>
+  </div>
+
   <script>
-    var q = document.getElementById("q");
-    q.focus();
+    var q = document.getElementById("q"); q.focus();
+    function post(m){ if (window.chrome && window.chrome.webview) window.chrome.webview.postMessage(m); }
     document.getElementById("f").addEventListener("submit", function (e) {
       e.preventDefault();
       var v = q.value.trim();
-      if (v && window.chrome && window.chrome.webview)
-        window.chrome.webview.postMessage("wisp:navigate:" + encodeURIComponent(v));
+      if (v) post("wisp:navigate:" + encodeURIComponent(v));
     });
 
     function renderTiles(sites) {
-      var c = document.getElementById("tiles");
-      c.innerHTML = "";
+      var c = document.getElementById("tiles"); c.innerHTML = "";
       (sites || []).forEach(function (s) {
         var a = document.createElement("a");
-        a.className = "tile";
-        a.href = s.url;
-        a.onclick = function (e) {
-          e.preventDefault();
-          if (window.chrome && window.chrome.webview)
-            window.chrome.webview.postMessage("wisp:navigate:" + encodeURIComponent(s.url));
-        };
+        a.className = "tile"; a.href = s.url;
+        a.onclick = function (e) { e.preventDefault(); post("wisp:navigate:" + encodeURIComponent(s.url)); };
         var ic = document.createElement("div"); ic.className = "ic";
         var img = document.createElement("img"); img.src = s.favicon; img.onerror = function(){ ic.textContent = "🌐"; img.remove(); };
         ic.appendChild(img);
         var sp = document.createElement("span"); sp.textContent = s.title;
-        a.appendChild(ic); a.appendChild(sp);
+        var x = document.createElement("button"); x.className = "x"; x.textContent = "✕"; x.title = "Remove";
+        x.onclick = function (e) { e.preventDefault(); e.stopPropagation(); post("wisp:newtab:remove:" + encodeURIComponent(s.url)); };
+        a.appendChild(ic); a.appendChild(sp); a.appendChild(x);
         c.appendChild(a);
       });
+      // add tile
+      var add = document.createElement("div");
+      add.className = "tile add";
+      add.innerHTML = '<div class="ic">+</div><span>Add</span>';
+      add.onclick = openModal;
+      c.appendChild(add);
     }
+
+    var modal = document.getElementById("modal");
+    function openModal(){ document.getElementById("mUrl").value=""; document.getElementById("mName").value=""; modal.classList.add("open"); document.getElementById("mUrl").focus(); }
+    function closeModal(){ modal.classList.remove("open"); }
+    document.getElementById("mCancel").onclick = closeModal;
+    modal.onclick = function(e){ if (e.target === modal) closeModal(); };
+    function doAdd(){
+      var url = document.getElementById("mUrl").value.trim();
+      var name = document.getElementById("mName").value.trim();
+      if (!url) return;
+      post("wisp:newtab:add:" + encodeURIComponent(name ? (name + "\n" + url) : url));
+      closeModal();
+    }
+    document.getElementById("mAdd").onclick = doAdd;
+    document.getElementById("mUrl").addEventListener("keydown", function(e){ if (e.key === "Enter") doAdd(); });
+    document.getElementById("mName").addEventListener("keydown", function(e){ if (e.key === "Enter") doAdd(); });
 
     if (window.chrome && window.chrome.webview) {
       window.chrome.webview.addEventListener("message", function (ev) {
@@ -79,7 +130,7 @@
           try { renderTiles(JSON.parse(ev.data.substring(17))); } catch (e) {}
         }
       });
-      window.chrome.webview.postMessage("wisp:newtab:get");
+      post("wisp:newtab:get");
     }
   </script>
 </body>
