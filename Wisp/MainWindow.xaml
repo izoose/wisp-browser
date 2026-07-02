@@ -21,17 +21,19 @@
         </Grid.RowDefinitions>
 
         <!-- Title bar: tabs live here (drag the empty area to move the window) -->
-        <Grid x:Name="TitleTabBar" Grid.Row="0" Background="{StaticResource ChromeBrush}" Height="40">
+        <Grid x:Name="TitleTabBar" Grid.Row="0" Background="{StaticResource ChromeBrush}" Height="40"
+              SizeChanged="TabScroller_SizeChanged">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>  <!-- tab scroller (width-capped so tabs shrink) -->
+                <ColumnDefinition Width="Auto"/>  <!-- + button, always visible -->
+                <ColumnDefinition Width="*"/>     <!-- caption drag area -->
+                <ColumnDefinition Width="Auto"/>  <!-- window controls -->
             </Grid.ColumnDefinitions>
 
-            <!-- Tabs + new-tab button; empty area to the right is caption (drag to move) -->
+            <!-- Tabs only; the + button and caption drag area sit to the right of this -->
             <ScrollViewer x:Name="TabScroller" Grid.Column="0" VerticalScrollBarVisibility="Disabled"
                           HorizontalScrollBarVisibility="Hidden" VerticalAlignment="Bottom"
                           SizeChanged="TabScroller_SizeChanged">
-                <StackPanel Orientation="Horizontal">
                 <ItemsControl x:Name="TabStrip" ItemsSource="{Binding Tabs}"
                               PreviewMouseLeftButtonDown="TabStrip_MouseDown"
                               PreviewMouseMove="TabStrip_MouseMove"
@@ -43,7 +45,7 @@
                     </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                            <Border x:Name="TabRoot" Width="{Binding Width}" Margin="2,6,0,0"
+                            <Border x:Name="TabRoot" Width="{Binding Width}" Margin="2,6,0,0" ClipToBounds="True"
                                     WindowChrome.IsHitTestVisibleInChrome="True" MouseDown="Tab_MouseDown"
                                     MouseEnter="Tab_HoverEnter" MouseLeave="Tab_HoverLeave"
                                     CornerRadius="8,8,0,0" Background="{StaticResource TabInactiveBrush}">
@@ -113,16 +115,15 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
-
-                    <!-- New-tab button sits right after the last tab, aligned with the tab tops -->
-                    <Button Content="&#xE710;" Click="NewTab_Click" Style="{StaticResource ToolButtonStyle}"
-                            Margin="6,6,0,0" VerticalAlignment="Top"
-                            WindowChrome.IsHitTestVisibleInChrome="True" ToolTip="New tab (Ctrl+T)"/>
-                </StackPanel>
                 </ScrollViewer>
 
+                <!-- New-tab button: always visible, right after the tab strip -->
+                <Button x:Name="NewTabBtn" Grid.Column="1" Content="&#xE710;" Click="NewTab_Click"
+                        Style="{StaticResource ToolButtonStyle}" Margin="4,6,0,0" VerticalAlignment="Top"
+                        WindowChrome.IsHitTestVisibleInChrome="True" ToolTip="New tab (Ctrl+T)"/>
+
                 <!-- Window controls -->
-                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top"
+                <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Top"
                             WindowChrome.IsHitTestVisibleInChrome="True">
                     <Button x:Name="MinBtn" Content="&#xE921;" Click="Minimize_Click"
                             Style="{StaticResource CaptionButtonStyle}" ToolTip="Minimize"/>

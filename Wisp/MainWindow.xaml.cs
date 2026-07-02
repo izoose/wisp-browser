@@ -173,18 +173,24 @@ public partial class MainWindow : Window
     /// <summary>Shrinks tabs to fit the strip so the "+" stays reachable (Chrome-style).</summary>
     private void RelayoutTabs()
     {
-        double avail = TabScroller.ActualWidth - 44; // reserve room for the + button
-        if (avail <= 0 || _tabs.Tabs.Count == 0) return;
+        if (_tabs.Tabs.Count == 0) return;
+        // Cap the tab strip's width so the + button and window controls stay visible no matter how
+        // many tabs there are. The + button now lives outside the scroller, so tabs just shrink.
+        const double captionControls = 152; // minimize / maximize / close
+        const double plusButton = 44;
+        double cap = TitleTabBar.ActualWidth - captionControls - plusButton - 8;
+        if (cap <= 0) return;
+        TabScroller.MaxWidth = cap;
 
-        const double pinnedW = 46, minW = 52, maxW = 200;
+        const double pinnedW = 44, minW = 40, maxW = 200;
         int pinned = _tabs.Tabs.Count(t => t.IsPinned);
         int normal = _tabs.Tabs.Count - pinned;
 
-        double per = normal > 0 ? (avail - pinned * pinnedW) / normal : maxW;
+        double per = normal > 0 ? (cap - pinned * pinnedW) / normal : maxW;
         per = Math.Clamp(per, minW, maxW);
 
         foreach (var t in _tabs.Tabs)
-            t.Width = t.IsPinned ? 44 : per;
+            t.Width = t.IsPinned ? pinnedW : per;
     }
 
     private void OnActiveTabUpdated()
@@ -2021,6 +2027,7 @@ public partial class MainWindow : Window
         Add(Key.N, ModifierKeys.Control | ModifierKeys.Shift, OpenPrivateWindow);
         Add(Key.F11, ModifierKeys.None, ToggleFullscreen);
         Add(Key.P, ModifierKeys.Control, PrintActive);
+        Add(Key.H, ModifierKeys.Control, OpenHistoryPage);
     }
 
     /// <summary>Shortcuts relayed from web content (fired on the UI thread).</summary>
@@ -2039,6 +2046,7 @@ public partial class MainWindow : Window
             case "bookmark": ToggleBookmark(); break;
             case "fullscreen": ToggleFullscreen(); break;
             case "print": PrintActive(); break;
+            case "history": OpenHistoryPage(); break;
             default:
                 if (cmd.StartsWith("navigate:", StringComparison.Ordinal))
                 {

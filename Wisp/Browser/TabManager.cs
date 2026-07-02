@@ -564,6 +564,7 @@ public class TabManager
       else if (k === 'r') cmd = 'reload';
       else if (k === 'f') cmd = 'find';
       else if (k === 'd') cmd = 'bookmark';
+      else if (k === 'h') cmd = 'history';
       else if (e.code === 'Tab') cmd = 'nexttab';
     } else if (e.altKey && !e.ctrlKey) {
       if (e.code === 'ArrowLeft') cmd = 'back';
