@@ -5,19 +5,31 @@
 <title>New Tab</title>
 <style>
   :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; background: #1b1b1d; color: #ededed;
     font-family: "Segoe UI", system-ui, sans-serif; }
-  .wrap { height: 100%; display: flex; flex-direction: column;
-    align-items: center; justify-content: center; gap: 30px; }
-  .logo { font-size: 46px; font-weight: 600; letter-spacing: 1px; opacity: .92; }
+  .wrap { min-height: 100%; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 26px; padding: 40px 20px; }
+  .logo { font-size: 44px; font-weight: 600; letter-spacing: 1px; opacity: .92; }
   .logo b { color: #4c8dff; font-weight: 600; }
-  form { width: min(560px, 78vw); }
-  input { width: 100%; box-sizing: border-box; padding: 15px 18px; font-size: 16px;
+  form { width: min(560px, 80vw); }
+  input { width: 100%; padding: 15px 18px; font-size: 16px;
     background: #37373d; color: #ededed; border: 1px solid #3a3a40;
     border-radius: 12px; outline: none; }
   input::placeholder { color: #8a8a92; }
   input:focus { border-color: #4c8dff; }
-  .hint { color: #7c7c85; font-size: 12.5px; }
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px;
+    width: min(560px, 80vw); }
+  .tile { display: flex; flex-direction: column; align-items: center; gap: 8px;
+    padding: 14px 6px; border-radius: 12px; cursor: pointer; text-decoration: none;
+    color: #d7d7dd; transition: background .12s; }
+  .tile:hover { background: #262629; }
+  .tile .ic { width: 32px; height: 32px; border-radius: 8px; background: #2c2c31;
+    display: flex; align-items: center; justify-content: center; }
+  .tile img { width: 20px; height: 20px; }
+  .tile span { font-size: 12px; max-width: 100%; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .hint { color: #6f6f78; font-size: 12px; }
 </style>
 </head>
 <body>
@@ -27,7 +39,8 @@
       <input id="q" autofocus spellcheck="false" autocomplete="off"
              placeholder="Search or enter address">
     </form>
-    <div class="hint">Ctrl+T new tab &middot; Ctrl+L address bar &middot; Ctrl+F find in page</div>
+    <div class="tiles" id="tiles"></div>
+    <div class="hint">Tip: type <b>yt</b>, <b>gh</b>, <b>r</b>… then a query for a quick site search</div>
   </div>
   <script>
     var q = document.getElementById("q");
@@ -35,10 +48,39 @@
     document.getElementById("f").addEventListener("submit", function (e) {
       e.preventDefault();
       var v = q.value.trim();
-      if (v && window.chrome && window.chrome.webview) {
+      if (v && window.chrome && window.chrome.webview)
         window.chrome.webview.postMessage("wisp:navigate:" + encodeURIComponent(v));
-      }
     });
+
+    function renderTiles(sites) {
+      var c = document.getElementById("tiles");
+      c.innerHTML = "";
+      (sites || []).forEach(function (s) {
+        var a = document.createElement("a");
+        a.className = "tile";
+        a.href = s.url;
+        a.onclick = function (e) {
+          e.preventDefault();
+          if (window.chrome && window.chrome.webview)
+            window.chrome.webview.postMessage("wisp:navigate:" + encodeURIComponent(s.url));
+        };
+        var ic = document.createElement("div"); ic.className = "ic";
+        var img = document.createElement("img"); img.src = s.favicon; img.onerror = function(){ ic.textContent = "🌐"; img.remove(); };
+        ic.appendChild(img);
+        var sp = document.createElement("span"); sp.textContent = s.title;
+        a.appendChild(ic); a.appendChild(sp);
+        c.appendChild(a);
+      });
+    }
+
+    if (window.chrome && window.chrome.webview) {
+      window.chrome.webview.addEventListener("message", function (ev) {
+        if (typeof ev.data === "string" && ev.data.indexOf("wisp:newtab:data:") === 0) {
+          try { renderTiles(JSON.parse(ev.data.substring(17))); } catch (e) {}
+        }
+      });
+      window.chrome.webview.postMessage("wisp:newtab:get");
+    }
   </script>
 </body>
 </html>

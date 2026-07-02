@@ -19,5 +19,13 @@ public static class AppPaths
     public static string BookmarksFile => Path.Combine(DataDir, "bookmarks.json");
     public static string HistoryFile => Path.Combine(DataDir, "history.json");
 
+    /// <summary>Passwords staged during import, injected into Login Data on next startup.</summary>
+    public static string PendingLoginsFile => Path.Combine(DataDir, "pending-logins.json");
+
+    // WebView2 lays its Chromium profile under an "EBWebView" subfolder of the user-data folder.
+    public static string WebViewProfileDir => Path.Combine(UserDataFolder, "EBWebView");
+    public static string WebViewLocalState => Path.Combine(WebViewProfileDir, "Local State");
+    public static string WebViewLoginData => Path.Combine(WebViewProfileDir, "Default", "Login Data");
+
     public static void EnsureDataDir() => Directory.CreateDirectory(DataDir);
 }

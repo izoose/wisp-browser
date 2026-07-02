@@ -219,6 +219,79 @@ public partial class MainWindow : Window
         _tabs.CloseTab((BrowserTab)((FrameworkElement)sender).DataContext);
     }
 
+    // ---- tab hover card (title, domain, memory) --------------------------------------
+
+    private DispatcherTimer? _hoverTimer;
+    private FrameworkElement? _hoverElement;
+    private BrowserTab? _hoverTab;
+    private int _hoverSeq;
+
+    private void Tab_HoverEnter(object sender, MouseEventArgs e)
+    {
+        _hoverElement = sender as FrameworkElement;
+        _hoverTab = _hoverElement?.DataContext as BrowserTab;
+        if (_hoverTab == null) return;
+        _hoverTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(450) };
+        _hoverTimer.Tick -= HoverTick;
+        _hoverTimer.Tick += HoverTick;
+        _hoverTimer.Stop();
+        _hoverTimer.Start();
+    }
+
+    private void Tab_HoverLeave(object sender, MouseEventArgs e)
+    {
+        _hoverTimer?.Stop();
+        TabHoverPopup.IsOpen = false;
+        _hoverSeq++;
+    }
+
+    private async void HoverTick(object? sender, EventArgs e)
+    {
+        _hoverTimer?.Stop();
+        var tab = _hoverTab;
+        var el = _hoverElement;
+        if (tab == null || el == null) return;
+
+        TabHoverTitle.Text = string.IsNullOrWhiteSpace(tab.Title) ? "New tab" : tab.Title;
+        TabHoverUrl.Text = tab.Url.StartsWith("https://wisp.newtab", StringComparison.OrdinalIgnoreCase) ? "Wisp" : HostForTitle(tab.Url);
+        TabHoverMem.Text = "…";
+        TabHoverPopup.PlacementTarget = el;
+        TabHoverPopup.IsOpen = true;
+
+        int seq = ++_hoverSeq;
+        var label = await TabMemoryLabelAsync(tab);
+        if (seq == _hoverSeq && TabHoverPopup.IsOpen) TabHoverMem.Text = label;
+    }
+
+    /// <summary>Real per-tab memory via WebView2's process/frame map, or the sleep state.</summary>
+    private async Task<string> TabMemoryLabelAsync(BrowserTab tab)
+    {
+        if (tab.State == TabState.Discarded || tab.View?.CoreWebView2 == null)
+            return "Discarded — reloads on click";
+        if (tab.State == TabState.Suspended)
+            return "Sleeping — memory freed";
+        try
+        {
+            var host = HostOf(tab.Url);
+            var infos = await _env.Core.GetProcessExtendedInfosAsync();
+            long ws = 0;
+            foreach (var pi in infos)
+            {
+                if (pi.ProcessInfo.Kind != CoreWebView2ProcessKind.Renderer) continue;
+                bool match = false;
+                foreach (var fi in pi.AssociatedFrameInfos)
+                    if (!string.IsNullOrEmpty(fi.Source)
+                        && string.Equals(HostOf(fi.Source), host, StringComparison.OrdinalIgnoreCase))
+                    { match = true; break; }
+                if (match)
+                    try { ws += System.Diagnostics.Process.GetProcessById(pi.ProcessInfo.ProcessId).WorkingSet64; } catch { }
+            }
+            if (ws > 0) return $"Memory usage: {Math.Round(ws / 1048576.0)} MB";
+        }
+        catch { }
+        return "Active";
+    }
+
     private void Tab_MouseDown(object sender, MouseButtonEventArgs e)
     {
         if (e.ChangedButton == MouseButton.Middle && ((FrameworkElement)sender).DataContext is BrowserTab tab)
@@ -1105,6 +1178,7 @@ public partial class MainWindow : Window
     }
 
     private const string SettingsUrl = "https://wisp.newtab/settings.html";
+    private const string HistoryUrl = "https://wisp.newtab/history.html";
 
     private async void OpenSettings()
     {
@@ -1112,6 +1186,13 @@ public partial class MainWindow : Window
         var existing = _tabs.Tabs.FirstOrDefault(t => t.Url.StartsWith(SettingsUrl, StringComparison.OrdinalIgnoreCase));
         if (existing != null) await _tabs.ActivateAsync(existing);
         else await _tabs.NewTabAsync(SettingsUrl, true);
+    }
+
+    private async void OpenHistoryPage()
+    {
+        var existing = _tabs.Tabs.FirstOrDefault(t => t.Url.StartsWith(HistoryUrl, StringComparison.OrdinalIgnoreCase));
+        if (existing != null) await _tabs.ActivateAsync(existing);
+        else await _tabs.NewTabAsync(HistoryUrl, true);
     }
 
     private void ApplySettings()
@@ -1258,7 +1339,7 @@ public partial class MainWindow : Window
         if (_isPrivate) { ShowToast("Import isn't available in a private window"); return; }
 
         var browsers = ChromiumImport.DetectBrowsers();
-        if (browsers.Count == 0) { ShowToast("No Chrome, Brave, or Edge profile found to import from"); return; }
+        if (browsers.Count == 0) { ShowToast("No Chromium browser (Brave, Chrome, Edge, Vivaldi, Opera…) found to import from"); return; }
 
         var choice = ImportDialog.Show(this, browsers);
         if (choice == null) return;
@@ -1269,6 +1350,12 @@ public partial class MainWindow : Window
         ShowToast($"Importing from {choice.Profile.Name}…");
         var res = await ChromiumImport.ImportAsync(
             choice.Profile, cw, _bookmarks, _history, choice.Cookies, choice.Bookmarks, choice.History);
+
+        // Passwords can't go through WebView2's API — stage them for injection on restart.
+        int pendingPw = 0;
+        if (choice.Passwords)
+            pendingPw = await Task.Run(() => ChromiumImport.PreparePasswordImport(
+                choice.Profile, AppPaths.WebViewLocalState, AppPaths.PendingLoginsFile));
 
         // Surface imported bookmarks: turn the bar on if it was hidden.
         if (res.Bookmarks > 0 && !_settings.BookmarksBarVisible)
@@ -1284,10 +1371,30 @@ public partial class MainWindow : Window
 
         if (res.Error != null)
             ShowToast("Import finished with an issue: " + res.Error);
-        else if (res.Any)
-            ShowToast($"Imported {res.Cookies} logins, {res.Bookmarks} bookmarks, {res.History} history entries");
+        else if (res.Any || pendingPw > 0)
+            ShowToast($"Imported {res.Cookies} logins, {res.Bookmarks} bookmarks, {res.History} history"
+                      + (pendingPw > 0 ? $", {pendingPw} passwords" : ""));
         else
             ShowToast("Nothing new to import");
+
+        if (pendingPw > 0) OfferPasswordRestart(pendingPw);
+    }
+
+    /// <summary>Passwords are written into Wisp's own Login Data on the next launch (the DB is
+    /// locked while running), so offer to restart now.</summary>
+    private void OfferPasswordRestart(int count)
+    {
+        var r = System.Windows.MessageBox.Show(this,
+            $"{count} saved password{(count == 1 ? "" : "s")} will be added when Wisp restarts.\n\nRestart now?",
+            "Finish importing passwords", MessageBoxButton.YesNo, MessageBoxImage.Question);
+        if (r != MessageBoxResult.Yes) return;
+        try
+        {
+            var exe = Environment.ProcessPath ?? System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
+            if (exe != null) System.Diagnostics.Process.Start(exe);
+        }
+        catch { }
+        Application.Current.Shutdown();
     }
 
     /// <summary>First-run offer: if this looks like a fresh Wisp and another browser is present,
@@ -1321,6 +1428,39 @@ public partial class MainWindow : Window
             _ = ClearBrowsingDataAsync();
         else if (rest == "import")
             _ = StartImportAsync();
+        else if (rest == "exportbm")
+            ExportBookmarks();
+        else if (rest == "importbm")
+            ImportBookmarks();
+    }
+
+    private void ExportBookmarks()
+    {
+        var dlg = new Microsoft.Win32.SaveFileDialog
+        {
+            FileName = "wisp-bookmarks.html", DefaultExt = ".html",
+            Filter = "Bookmarks (*.html)|*.html",
+        };
+        if (dlg.ShowDialog() != true) return;
+        try { System.IO.File.WriteAllText(dlg.FileName, _bookmarks.ExportHtml()); ShowToast("Bookmarks exported"); }
+        catch { ShowToast("Couldn't export bookmarks"); }
+    }
+
+    private void ImportBookmarks()
+    {
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Filter = "Bookmark files (*.html;*.htm)|*.html;*.htm|All files (*.*)|*.*",
+        };
+        if (dlg.ShowDialog() != true) return;
+        try
+        {
+            int n = _bookmarks.ImportHtml(System.IO.File.ReadAllText(dlg.FileName));
+            if (n > 0 && !_settings.BookmarksBarVisible) { _settings.BookmarksBarVisible = true; _settings.Save(); }
+            ApplyBookmarksBar();
+            ShowToast($"Imported {n} bookmark{(n == 1 ? "" : "s")}");
+        }
+        catch { ShowToast("Couldn't import bookmarks"); }
     }
 
     private string SettingsJson() => System.Text.Json.JsonSerializer.Serialize(new
@@ -1385,6 +1525,35 @@ public partial class MainWindow : Window
     private void MenuZoomIn_Click(object sender, RoutedEventArgs e) { _tabs.ZoomIn(); UpdateMenuZoom(); }
     private void MenuZoomOut_Click(object sender, RoutedEventArgs e) { _tabs.ZoomOut(); UpdateMenuZoom(); }
     private void MenuFullscreen_Click(object sender, RoutedEventArgs e) { MenuPopup.IsOpen = false; ToggleFullscreen(); }
+
+    /// <summary>Injects Google's page-translate widget and translates the current page to English.</summary>
+    private void TranslatePage()
+    {
+        var cw = _tabs.Active?.View?.CoreWebView2;
+        if (cw == null) return;
+        try { _ = cw.ExecuteScriptAsync(TranslateScript); }
+        catch { }
+        ShowToast("Translating to English…");
+    }
+
+    private const string TranslateScript = @"
+(function(){
+  try {
+    var parts = location.hostname.split('.');
+    var base = parts.length > 1 ? parts.slice(-2).join('.') : location.hostname;
+    document.cookie = 'googtrans=/auto/en; path=/';
+    document.cookie = 'googtrans=/auto/en; domain=.' + base + '; path=/';
+  } catch (e) {}
+  if (window.__wispTranslate) { location.reload(); return; }
+  window.__wispTranslate = true;
+  window.googleTranslateElementInit = function(){
+    try { new google.translate.TranslateElement({pageLanguage:'auto', includedLanguages:'en', autoDisplay:true},
+      document.body.appendChild(document.createElement('div'))); } catch (e) {}
+  };
+  var s = document.createElement('script');
+  s.src = 'https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit';
+  document.head.appendChild(s);
+})();";
 
     private void PrintActive()
     {
@@ -1689,10 +1858,11 @@ public partial class MainWindow : Window
             case "newtab": MenuPopup.IsOpen = false; OpenNewTab(); break;
             case "bookmark": MenuPopup.IsOpen = false; ToggleBookmark(); break;
             case "bookmarks": ShowBookmarks(); break;
-            case "history": ShowHistory(); break;
+            case "history": MenuPopup.IsOpen = false; OpenHistoryPage(); break;
             case "find": MenuPopup.IsOpen = false; ShowFind(); break;
             case "print": MenuPopup.IsOpen = false; PrintActive(); break;
             case "reader": MenuPopup.IsOpen = false; OpenReader(); break;
+            case "translate": MenuPopup.IsOpen = false; TranslatePage(); break;
             case "private": MenuPopup.IsOpen = false; OpenPrivate(); break;
             case "settings": MenuPopup.IsOpen = false; OpenSettings(); break;
             case "forcedark": ToggleForceDark(); break;
@@ -1873,7 +2043,76 @@ public partial class MainWindow : Window
                 {
                     HandleSettingsMessage(cmd.Substring("settings:".Length));
                 }
+                else if (cmd.StartsWith("newtab:", StringComparison.Ordinal))
+                {
+                    HandleNewTabMessage(cmd.Substring("newtab:".Length));
+                }
+                else if (cmd.StartsWith("history:", StringComparison.Ordinal))
+                {
+                    HandleHistoryMessage(cmd.Substring("history:".Length));
+                }
                 break;
+        }
+    }
+
+    // ---- new-tab page (top sites) ----------------------------------------------------
+
+    private void HandleNewTabMessage(string rest)
+    {
+        if (rest != "get") return;
+        var cw = _tabs.Active?.View?.CoreWebView2;
+        cw?.PostWebMessageAsString("wisp:newtab:data:" + TopSitesJson());
+    }
+
+    /// <summary>Most-visited sites (by host) for the new-tab shortcuts.</summary>
+    private string TopSitesJson()
+    {
+        var top = _history.Items
+            .Where(h => h.Url.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+            .Select(h => new { h.Url, h.Title, Host = HostOf(h.Url) })
+            .Where(h => !string.IsNullOrEmpty(h.Host) && !h.Host.Contains("wisp.newtab"))
+            .GroupBy(h => h.Host)
+            .Select(g => new
+            {
+                url = "https://" + g.Key,
+                title = g.Key.StartsWith("www.") ? g.Key.Substring(4) : g.Key,
+                favicon = $"https://www.google.com/s2/favicons?sz=64&domain={g.Key}",
+                count = g.Count(),
+            })
+            .OrderByDescending(x => x.count)
+            .Take(8);
+        return System.Text.Json.JsonSerializer.Serialize(top);
+    }
+
+    // ---- history page ----------------------------------------------------------------
+
+    private void HandleHistoryMessage(string rest)
+    {
+        var cw = _tabs.Active?.View?.CoreWebView2;
+        if (rest == "get")
+        {
+            var items = _history.Recent(500).Select(h => new
+            {
+                url = h.Url,
+                title = string.IsNullOrWhiteSpace(h.Title) ? h.Url : h.Title,
+                when = h.VisitedUtc.ToLocalTime().ToString("o"),
+            });
+            cw?.PostWebMessageAsString("wisp:history:data:" + System.Text.Json.JsonSerializer.Serialize(items));
+        }
+        else if (rest.StartsWith("open:", StringComparison.Ordinal))
+        {
+            _ = _tabs.NavigateActiveAsync(Uri.UnescapeDataString(rest.Substring(5)));
+        }
+        else if (rest.StartsWith("remove:", StringComparison.Ordinal))
+        {
+            var url = Uri.UnescapeDataString(rest.Substring(7));
+            _history.Items.RemoveAll(h => h.Url == url);
+            _history.Save();
+        }
+        else if (rest == "clear")
+        {
+            _history.Items.Clear();
+            _history.Save();
         }
     }
 

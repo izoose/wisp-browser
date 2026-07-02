@@ -45,6 +45,7 @@
                         <DataTemplate>
                             <Border x:Name="TabRoot" Width="{Binding Width}" Margin="2,6,0,0"
                                     WindowChrome.IsHitTestVisibleInChrome="True" MouseDown="Tab_MouseDown"
+                                    MouseEnter="Tab_HoverEnter" MouseLeave="Tab_HoverLeave"
                                     CornerRadius="8,8,0,0" Background="{StaticResource TabInactiveBrush}">
                                     <Border.ContextMenu>
                                         <ContextMenu Style="{StaticResource DarkContextMenu}">
@@ -403,6 +404,7 @@
                     <Button Content="Find in page" Tag="find" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
                     <Button Content="Print…" Tag="print" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
                     <Button Content="Reader mode" Tag="reader" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
+                    <Button Content="Translate to English" Tag="translate" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
                     <Border Height="1" Background="{StaticResource EdgeBorderBrush}" Margin="4,6"/>
                     <Button Content="New private window" Tag="private" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
                     <Button x:Name="ForceDarkBtn" Content="Force dark on all sites" Tag="forcedark" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
@@ -428,6 +430,26 @@
                         <StackPanel x:Name="ListItems"/>
                     </ScrollViewer>
                 </DockPanel>
+            </Border>
+        </Popup>
+
+        <!-- Tab hover card (Chrome-style: title, domain, memory) -->
+        <Popup x:Name="TabHoverPopup" Placement="Bottom" AllowsTransparency="True" StaysOpen="True"
+               IsHitTestVisible="False" PopupAnimation="Fade" VerticalOffset="2">
+            <Border Background="#F02A2A2E" BorderBrush="{StaticResource EdgeBorderBrush}" BorderThickness="1"
+                    CornerRadius="8" Padding="14,11" MaxWidth="320">
+                <StackPanel>
+                    <TextBlock x:Name="TabHoverTitle" Foreground="{StaticResource TextBrush}" FontSize="13"
+                               FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                    <TextBlock x:Name="TabHoverUrl" Foreground="{StaticResource TextDimBrush}" FontSize="12"
+                               Margin="0,2,0,0" TextTrimming="CharacterEllipsis"/>
+                    <Border Height="1" Background="{StaticResource EdgeBorderBrush}" Margin="0,9"/>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE9D9;" FontFamily="Segoe MDL2 Assets" FontSize="13"
+                                   Foreground="{StaticResource TextDimBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBlock x:Name="TabHoverMem" Foreground="{StaticResource TextDimBrush}" FontSize="12.5" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </StackPanel>
             </Border>
         </Popup>
 

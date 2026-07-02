@@ -1,8 +1,10 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 
 namespace Wisp;
 
@@ -168,5 +170,60 @@ public class Bookmarks
         (parent?.Children ?? Roots).Add(f);
         Save();
         return f;
+    }
+
+    // ---- import / export (Netscape bookmark HTML, the format every browser reads) -----
+
+    public string ExportHtml()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("<!DOCTYPE NETSCAPE-Bookmark-file-1>");
+        sb.AppendLine("<META HTTP-EQUIV=\"Content-Type\" CONTENT=\"text/html; charset=UTF-8\">");
+        sb.AppendLine("<TITLE>Bookmarks</TITLE>");
+        sb.AppendLine("<H1>Bookmarks</H1>");
+        sb.AppendLine("<DL><p>");
+        WriteNodes(sb, Roots, 1);
+        sb.AppendLine("</DL><p>");
+        return sb.ToString();
+    }
+
+    private static void WriteNodes(StringBuilder sb, List<BookmarkNode> nodes, int indent)
+    {
+        var pad = new string(' ', indent * 4);
+        foreach (var n in nodes)
+        {
+            if (n.IsFolder)
+            {
+                sb.AppendLine($"{pad}<DT><H3>{Esc(n.Title)}</H3>");
+                sb.AppendLine($"{pad}<DL><p>");
+                WriteNodes(sb, n.Children, indent + 1);
+                sb.AppendLine($"{pad}</DL><p>");
+            }
+            else
+            {
+                sb.AppendLine($"{pad}<DT><A HREF=\"{Esc(n.Url ?? "")}\">{Esc(n.Title)}</A>");
+            }
+        }
+    }
+
+    private static string Esc(string s) => System.Net.WebUtility.HtmlEncode(s);
+
+    /// <summary>Imports links from a Netscape bookmark HTML file (flat), deduped. Returns count added.</summary>
+    public int ImportHtml(string html)
+    {
+        var existing = new HashSet<string>(AllUrls().Select(u => u.url), StringComparer.OrdinalIgnoreCase);
+        int added = 0;
+        foreach (Match m in Regex.Matches(html, "<A[^>]*HREF=\"([^\"]*)\"[^>]*>(.*?)</A>",
+                     RegexOptions.IgnoreCase | RegexOptions.Singleline))
+        {
+            var url = System.Net.WebUtility.HtmlDecode(m.Groups[1].Value);
+            if (string.IsNullOrEmpty(url) || !url.StartsWith("http", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!existing.Add(url)) continue;
+            var title = System.Net.WebUtility.HtmlDecode(Regex.Replace(m.Groups[2].Value, "<[^>]+>", "")).Trim();
+            Roots.Add(BookmarkNode.Link(url, string.IsNullOrEmpty(title) ? url : title));
+            added++;
+        }
+        if (added > 0) Save();
+        return added;
     }
 }

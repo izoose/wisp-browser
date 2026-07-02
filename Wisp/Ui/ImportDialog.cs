@@ -12,7 +12,7 @@ public static class ImportDialog
     public class Choice
     {
         public BrowserProfile Profile = null!;
-        public bool Cookies, Bookmarks, History;
+        public bool Cookies, Bookmarks, History, Passwords;
     }
 
     private static readonly Brush Fg = new SolidColorBrush(Color.FromRgb(0xe6, 0xe6, 0xe6));
@@ -56,9 +56,11 @@ public static class ImportDialog
         var cCookies = Check("Cookies & logins  (stay signed in)", true);
         var cBookmarks = Check("Bookmarks  (with folders)", true);
         var cHistory = Check("Browsing history", true);
+        var cPasswords = Check("Saved passwords  (needs a restart)", true);
         panel.Children.Add(cCookies);
         panel.Children.Add(cBookmarks);
         panel.Children.Add(cHistory);
+        panel.Children.Add(cPasswords);
 
         Choice? choice = null;
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 20, 0, 0) };
@@ -78,6 +80,7 @@ public static class ImportDialog
                 Cookies = cCookies.IsChecked == true,
                 Bookmarks = cBookmarks.IsChecked == true,
                 History = cHistory.IsChecked == true,
+                Passwords = cPasswords.IsChecked == true,
             };
             win.DialogResult = true;
         };

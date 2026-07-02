@@ -53,8 +53,11 @@
     <div class="card">
       <h2>Get started</h2>
       <div class="row first"><div><div class="label">Import from another browser</div>
-        <div class="sub">Bring cookies &amp; logins, bookmarks, and history from Brave, Chrome, or Edge</div></div>
+        <div class="sub">Bring cookies &amp; logins, passwords, bookmarks, and history from Brave, Chrome, Edge, Vivaldi, Opera…</div></div>
         <button class="btn" id="import">Import…</button></div>
+      <div class="row"><div><div class="label">Bookmarks file</div>
+        <div class="sub">Export or import bookmarks as an HTML file (works with any browser)</div></div>
+        <div><button class="btn" id="exportbm">Export</button> <button class="btn" id="importbm">Import</button></div></div>
     </div>
 
     <div class="card">
@@ -144,6 +147,12 @@
   };
   document.getElementById('import').onclick = function () {
     if (window.chrome && window.chrome.webview) window.chrome.webview.postMessage('wisp:settings:import');
+  };
+  document.getElementById('exportbm').onclick = function () {
+    if (window.chrome && window.chrome.webview) window.chrome.webview.postMessage('wisp:settings:exportbm');
+  };
+  document.getElementById('importbm').onclick = function () {
+    if (window.chrome && window.chrome.webview) window.chrome.webview.postMessage('wisp:settings:importbm');
   };
 
   if (window.chrome && window.chrome.webview) {

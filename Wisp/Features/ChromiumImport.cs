@@ -32,13 +32,15 @@ public class BrowserProfile
     }
     public string BookmarksPath => Path.Combine(ProfilePath, "Bookmarks");
     public string HistoryPath => Path.Combine(ProfilePath, "History");
+    public string LoginDataPath => Path.Combine(ProfilePath, "Login Data");
+    public bool HasLogins => File.Exists(LoginDataPath);
 }
 
 public class ImportResult
 {
-    public int Cookies, Bookmarks, History;
+    public int Cookies, Bookmarks, History, Passwords;
     public string? Error;
-    public bool Any => Cookies + Bookmarks + History > 0;
+    public bool Any => Cookies + Bookmarks + History + Passwords > 0;
 }
 
 /// <summary>
@@ -55,18 +57,35 @@ public static class ChromiumImport
     public static List<BrowserProfile> DetectBrowsers()
     {
         var lad = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var roam = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         var found = new List<BrowserProfile>();
-        void Try(string name, string rel)
+
+        // Standard layout: <User Data> holding Local State + Default/Profile N subfolders.
+        void Try(string name, string userData)
         {
-            var userData = Path.Combine(lad, rel);
             if (!File.Exists(Path.Combine(userData, "Local State"))) return;
             var profile = BestProfile(userData);
             if (profile == null) return;
             found.Add(new BrowserProfile { Name = name, UserDataPath = userData, ProfilePath = profile });
         }
-        Try("Brave", Path.Combine("BraveSoftware", "Brave-Browser", "User Data"));
-        Try("Google Chrome", Path.Combine("Google", "Chrome", "User Data"));
-        Try("Microsoft Edge", Path.Combine("Microsoft", "Edge", "User Data"));
+        // Flat layout (Opera): the user-data folder IS the profile.
+        void TryFlat(string name, string dir)
+        {
+            if (!File.Exists(Path.Combine(dir, "Local State"))) return;
+            found.Add(new BrowserProfile { Name = name, UserDataPath = dir, ProfilePath = dir });
+        }
+
+        Try("Brave", Path.Combine(lad, "BraveSoftware", "Brave-Browser", "User Data"));
+        Try("Brave Beta", Path.Combine(lad, "BraveSoftware", "Brave-Browser-Beta", "User Data"));
+        Try("Google Chrome", Path.Combine(lad, "Google", "Chrome", "User Data"));
+        Try("Chrome Beta", Path.Combine(lad, "Google", "Chrome Beta", "User Data"));
+        Try("Microsoft Edge", Path.Combine(lad, "Microsoft", "Edge", "User Data"));
+        Try("Vivaldi", Path.Combine(lad, "Vivaldi", "User Data"));
+        Try("Chromium", Path.Combine(lad, "Chromium", "User Data"));
+        Try("Yandex", Path.Combine(lad, "Yandex", "YandexBrowser", "User Data"));
+        Try("Epic", Path.Combine(lad, "Epic Privacy Browser", "User Data"));
+        TryFlat("Opera", Path.Combine(roam, "Opera Software", "Opera Stable"));
+        TryFlat("Opera GX", Path.Combine(roam, "Opera Software", "Opera GX Stable"));
         return found;
     }
 
@@ -348,6 +367,136 @@ public static class ChromiumImport
         catch { }
         finally { SafeDelete(tmp); }
         return added;
+    }
+
+    // ---- passwords (deferred: injected into Wisp's Login Data on next startup) --------
+
+    public record PreparedLogin(string OriginUrl, string ActionUrl, string UsernameElement,
+        string UsernameValue, string PasswordElement, string SignonRealm, long DateCreated, int Scheme, string PasswordB64);
+
+    /// <summary>Decrypts saved passwords from the source browser and re-encrypts them with Wisp's
+    /// own key into a pending file. They're inserted into Wisp's Login Data at next startup, since
+    /// that database is locked while Wisp is running. Returns how many real credentials were prepared.</summary>
+    public static int PreparePasswordImport(BrowserProfile prof, string wispLocalStatePath, string pendingFile)
+    {
+        if (!prof.HasLogins || !File.Exists(wispLocalStatePath)) return 0;
+        byte[] srcKey, wispKey;
+        try { srcKey = GetMasterKey(prof.LocalStatePath); wispKey = GetMasterKey(wispLocalStatePath); }
+        catch { return 0; }
+
+        var prepared = new List<PreparedLogin>();
+        var tmp = CopyLocked(prof.LoginDataPath);
+        try
+        {
+            using var conn = new SqliteConnection($"Data Source={tmp};Pooling=False");
+            conn.Open();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT origin_url, action_url, username_element, username_value, password_element, password_value, signon_realm, date_created, scheme, blacklisted_by_user FROM logins";
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+            {
+                bool blacklisted = !r.IsDBNull(9) && r.GetInt64(9) != 0;
+                var enc = r.IsDBNull(5) ? Array.Empty<byte>() : r.GetFieldValue<byte[]>(5);
+                if (blacklisted || enc.Length == 0) continue; // skip "never save" entries
+                var plain = DecryptRaw(enc, srcKey);
+                if (plain == null || plain.Length == 0) continue;
+                prepared.Add(new PreparedLogin(
+                    Str(r, 0), Str(r, 1), Str(r, 2), Str(r, 3), Str(r, 4), Str(r, 6),
+                    r.IsDBNull(7) ? 0 : r.GetInt64(7), r.IsDBNull(8) ? 0 : (int)r.GetInt64(8),
+                    Convert.ToBase64String(EncryptV10(wispKey, plain))));
+            }
+        }
+        catch { }
+        finally { SafeDelete(tmp); }
+
+        if (prepared.Count == 0) return 0;
+        try { File.WriteAllText(pendingFile, JsonSerializer.Serialize(prepared)); }
+        catch { return 0; }
+        return prepared.Count;
+
+        static string Str(SqliteDataReader r, int i) => r.IsDBNull(i) ? "" : r.GetString(i);
+    }
+
+    /// <summary>Startup step (Login Data unlocked): inserts prepared logins into Wisp's Login Data,
+    /// then deletes the pending file. Dedupes via the table's unique index (INSERT OR IGNORE).</summary>
+    public static int ApplyPendingPasswords(string pendingFile, string wispLoginData)
+    {
+        if (!File.Exists(pendingFile) || !File.Exists(wispLoginData)) { TryDelete(pendingFile); return 0; }
+        List<PreparedLogin>? rows;
+        try { rows = JsonSerializer.Deserialize<List<PreparedLogin>>(File.ReadAllText(pendingFile)); }
+        catch { TryDelete(pendingFile); return 0; }
+        if (rows == null || rows.Count == 0) { TryDelete(pendingFile); return 0; }
+
+        int added = 0;
+        try
+        {
+            using var conn = new SqliteConnection($"Data Source={wispLoginData};Pooling=False");
+            conn.Open();
+            using var tx = conn.BeginTransaction();
+            foreach (var row in rows)
+            {
+                try
+                {
+                    using var ins = conn.CreateCommand();
+                    ins.Transaction = tx;
+                    ins.CommandText = "INSERT OR IGNORE INTO logins(origin_url,action_url,username_element,username_value,password_element,password_value,signon_realm,date_created,blacklisted_by_user,scheme,password_type,times_used,date_last_used,date_password_modified) VALUES(@o,@a,@ue,@u,@pe,@p,@r,@dc,0,@sc,0,0,@dc,@dc)";
+                    ins.Parameters.AddWithValue("@o", row.OriginUrl);
+                    ins.Parameters.AddWithValue("@a", row.ActionUrl);
+                    ins.Parameters.AddWithValue("@ue", row.UsernameElement);
+                    ins.Parameters.AddWithValue("@u", row.UsernameValue);
+                    ins.Parameters.AddWithValue("@pe", row.PasswordElement);
+                    ins.Parameters.AddWithValue("@p", Convert.FromBase64String(row.PasswordB64));
+                    ins.Parameters.AddWithValue("@r", row.SignonRealm);
+                    ins.Parameters.AddWithValue("@dc", row.DateCreated > 0 ? row.DateCreated : 13300000000000000L);
+                    ins.Parameters.AddWithValue("@sc", row.Scheme);
+                    added += ins.ExecuteNonQuery();
+                }
+                catch { }
+            }
+            tx.Commit();
+        }
+        catch { }
+        finally { TryDelete(pendingFile); }
+        return added;
+    }
+
+    private static void TryDelete(string path) { try { if (File.Exists(path)) File.Delete(path); } catch { } }
+
+    /// <summary>Decrypts a Chromium blob (v10/v11 AES-GCM, or legacy DPAPI) to raw bytes.</summary>
+    private static byte[]? DecryptRaw(byte[] enc, byte[] key)
+    {
+        if (enc.Length == 0) return Array.Empty<byte>();
+        try
+        {
+            if (enc.Length > 3 + 12 + 16 && enc[0] == (byte)'v' && enc[1] == (byte)'1'
+                && (enc[2] == (byte)'0' || enc[2] == (byte)'1'))
+            {
+                var nonce = enc[3..15];
+                var tag = enc[^16..];
+                var cipher = enc[15..^16];
+                var plain = new byte[cipher.Length];
+                using var gcm = new AesGcm(key, 16);
+                gcm.Decrypt(nonce, cipher, tag, plain);
+                return plain;
+            }
+            return ProtectedData.Unprotect(enc, null, DataProtectionScope.CurrentUser);
+        }
+        catch { return null; }
+    }
+
+    /// <summary>Encrypts bytes in Chromium's v10 format (AES-256-GCM) for Wisp's own store.</summary>
+    private static byte[] EncryptV10(byte[] key, byte[] plain)
+    {
+        var nonce = RandomNumberGenerator.GetBytes(12);
+        var cipher = new byte[plain.Length];
+        var tag = new byte[16];
+        using (var gcm = new AesGcm(key, 16)) gcm.Encrypt(nonce, plain, cipher, tag);
+        var o = new byte[3 + 12 + cipher.Length + 16];
+        o[0] = (byte)'v'; o[1] = (byte)'1'; o[2] = (byte)'0';
+        nonce.CopyTo(o, 3);
+        cipher.CopyTo(o, 15);
+        tag.CopyTo(o, 15 + cipher.Length);
+        return o;
     }
 
     // ---- helpers ---------------------------------------------------------------------

@@ -1,0 +1,93 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>History</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #1b1b1d; color: #e6e6e6;
+    font-family: "Segoe UI", system-ui, sans-serif; }
+  .top { position: sticky; top: 0; background: #1b1b1d; z-index: 2;
+    border-bottom: 1px solid #2f2f36; }
+  .top .wrap { display: flex; align-items: center; gap: 16px; padding: 20px 24px; }
+  .logo { font-size: 20px; font-weight: 600; } .logo b { color: #4c8dff; }
+  h1 { font-size: 20px; margin: 0; font-weight: 600; }
+  .grow { flex: 1; }
+  input.search { width: 320px; max-width: 40vw; background: #37373d; border: 1px solid #3a3a42;
+    border-radius: 8px; color: #e6e6e6; padding: 9px 12px; font-size: 14px; outline: none; }
+  input.search:focus { border-color: #4c8dff; }
+  .btn { padding: 9px 14px; border-radius: 8px; border: 1px solid #5a2b2b; background: #2c2c32;
+    color: #ff8a8a; cursor: pointer; font-size: 13px; }
+  .btn:hover { background: #3a2020; }
+  .wrap { max-width: 820px; margin: 0 auto; padding: 0 24px 60px; }
+  .day { font-size: 12px; text-transform: uppercase; letter-spacing: .6px; color: #8a8a92;
+    margin: 22px 4px 8px; }
+  .row { display: flex; align-items: center; gap: 12px; padding: 9px 12px; border-radius: 8px; }
+  .row:hover { background: #232327; }
+  .row img { width: 16px; height: 16px; flex: none; }
+  .row .t { flex: 1; min-width: 0; }
+  .row .title { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+  .row .url { font-size: 12px; color: #8a8a92; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .time { font-size: 12px; color: #8a8a92; flex: none; }
+  .row .x { flex: none; width: 26px; height: 26px; border: 0; background: transparent; color: #8a8a92;
+    cursor: pointer; border-radius: 6px; opacity: 0; font-size: 15px; }
+  .row:hover .x { opacity: 1; } .row .x:hover { background: #3a3a42; color: #fff; }
+  .empty { color: #8a8a92; padding: 40px 4px; text-align: center; }
+</style>
+</head>
+<body>
+  <div class="top"><div class="wrap" style="max-width:820px;margin:0 auto;">
+    <span class="logo">wisp<b>.</b></span><h1>History</h1>
+    <span class="grow"></span>
+    <input class="search" id="s" placeholder="Search history" spellcheck="false">
+    <button class="btn" id="clear">Clear all</button>
+  </div></div>
+  <div class="wrap"><div id="list"></div></div>
+<script>
+  var ALL = [];
+  function host(u){ try { return new URL(u).hostname.replace(/^www\./,''); } catch(e){ return u; } }
+  function fav(u){ try { return "https://www.google.com/s2/favicons?sz=64&domain=" + new URL(u).hostname; } catch(e){ return ""; } }
+  function send(m){ if (window.chrome && window.chrome.webview) window.chrome.webview.postMessage(m); }
+
+  function render(items) {
+    var list = document.getElementById("list"); list.innerHTML = "";
+    if (!items.length) { list.innerHTML = '<div class="empty">No history yet.</div>'; return; }
+    var lastDay = "";
+    items.forEach(function (h) {
+      var d = new Date(h.when);
+      var day = d.toLocaleDateString(undefined, { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+      if (day !== lastDay) { lastDay = day; var dh = document.createElement("div"); dh.className = "day"; dh.textContent = day; list.appendChild(dh); }
+      var row = document.createElement("div"); row.className = "row";
+      var img = document.createElement("img"); img.src = fav(h.url); img.onerror=function(){img.style.visibility='hidden';};
+      var t = document.createElement("div"); t.className = "t";
+      var ti = document.createElement("div"); ti.className = "title"; ti.textContent = h.title || h.url;
+      ti.onclick = function(){ send("wisp:history:open:" + encodeURIComponent(h.url)); };
+      var ur = document.createElement("div"); ur.className = "url"; ur.textContent = host(h.url);
+      t.appendChild(ti); t.appendChild(ur);
+      var tm = document.createElement("div"); tm.className = "time";
+      tm.textContent = d.toLocaleTimeString(undefined, { hour:'numeric', minute:'2-digit' });
+      var x = document.createElement("button"); x.className = "x"; x.textContent = "✕"; x.title = "Remove";
+      x.onclick = function(){ send("wisp:history:remove:" + encodeURIComponent(h.url)); ALL = ALL.filter(function(e){return e.url!==h.url;}); apply(); };
+      row.appendChild(img); row.appendChild(t); row.appendChild(tm); row.appendChild(x);
+      list.appendChild(row);
+    });
+  }
+  function apply() {
+    var q = document.getElementById("s").value.trim().toLowerCase();
+    render(!q ? ALL : ALL.filter(function(h){ return (h.title||"").toLowerCase().indexOf(q)>=0 || h.url.toLowerCase().indexOf(q)>=0; }));
+  }
+  document.getElementById("s").addEventListener("input", apply);
+  document.getElementById("clear").onclick = function(){ if (confirm("Clear all browsing history?")) { send("wisp:history:clear"); ALL = []; apply(); } };
+
+  if (window.chrome && window.chrome.webview) {
+    window.chrome.webview.addEventListener("message", function (ev) {
+      if (typeof ev.data === "string" && ev.data.indexOf("wisp:history:data:") === 0) {
+        try { ALL = JSON.parse(ev.data.substring(18)); apply(); } catch (e) {}
+      }
+    });
+    send("wisp:history:get");
+  }
+</script>
+</body>
+</html>

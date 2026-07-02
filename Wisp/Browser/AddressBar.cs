@@ -21,6 +21,18 @@ public static class AddressBar
             text.StartsWith("wisp:", StringComparison.OrdinalIgnoreCase))
             return text;
 
+        // Keyword shortcut: "yt cats" -> YouTube search. First token must match a keyword exactly.
+        int sp = text.IndexOf(' ');
+        if (sp > 0 && settings.SearchKeywords != null)
+        {
+            var kw = text.Substring(0, sp);
+            var rest = text.Substring(sp + 1).Trim();
+            foreach (var k in settings.SearchKeywords)
+                if (rest.Length > 0 && !string.IsNullOrEmpty(k.Template)
+                    && string.Equals(k.Keyword, kw, StringComparison.OrdinalIgnoreCase))
+                    return k.Template.Replace("%s", Uri.EscapeDataString(rest));
+        }
+
         // localhost / localhost:port
         if (text.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
             text.StartsWith("localhost:", StringComparison.OrdinalIgnoreCase))

@@ -8,6 +8,24 @@ namespace Wisp;
 /// User preferences, persisted as JSON in %APPDATA%\Wisp\settings.json.
 /// Kept deliberately small — this is a barebones browser.
 /// </summary>
+/// <summary>An omnibox keyword shortcut (e.g. "yt" -> YouTube search). %s is replaced by the query.</summary>
+public class SearchKeyword
+{
+    public string Keyword { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string Template { get; set; } = "";
+
+    public static System.Collections.Generic.List<SearchKeyword> Defaults() => new()
+    {
+        new() { Keyword = "yt",  Name = "YouTube",      Template = "https://www.youtube.com/results?search_query=%s" },
+        new() { Keyword = "gh",  Name = "GitHub",       Template = "https://github.com/search?q=%s" },
+        new() { Keyword = "w",   Name = "Wikipedia",    Template = "https://en.wikipedia.org/wiki/Special:Search?search=%s" },
+        new() { Keyword = "a",   Name = "Amazon",       Template = "https://www.amazon.com/s?k=%s" },
+        new() { Keyword = "r",   Name = "Reddit",       Template = "https://www.reddit.com/search/?q=%s" },
+        new() { Keyword = "map", Name = "Google Maps",  Template = "https://www.google.com/maps/search/%s" },
+    };
+}
+
 public class AppSettings
 {
     public string SearchEngine { get; set; } = "Google";
@@ -44,6 +62,9 @@ public class AppSettings
 
     /// <summary>Whether we've already offered to import data from another browser (first-run prompt).</summary>
     public bool ImportOffered { get; set; }
+
+    /// <summary>Omnibox keyword shortcuts: type "yt cats" to search YouTube. %s is the query.</summary>
+    public System.Collections.Generic.List<SearchKeyword> SearchKeywords { get; set; } = SearchKeyword.Defaults();
 
     public static AppSettings Load()
     {

@@ -31,7 +31,10 @@ public partial class App : Application
         var startupUrl = ParseArg(e.Args);
 
         _mutex = new Mutex(true, MutexName, out bool isNew);
-        if (!isNew)
+        // WISP_NO_SINGLE_INSTANCE lets a fully isolated instance run alongside a normal one
+        // (used for benchmarking with a throwaway WISP_UDF).
+        bool soloAllowed = Environment.GetEnvironmentVariable("WISP_NO_SINGLE_INSTANCE") == "1";
+        if (!isNew && !soloAllowed)
         {
             // Another Wisp is running — hand it the URL and exit.
             TrySendToRunningInstance(startupUrl);
@@ -43,6 +46,15 @@ public partial class App : Application
         AppPaths.EnsureDataDir();
         Settings = AppSettings.Load();
         try { DefaultBrowser.Register(); } catch { }
+
+        // Finish any password import staged before the last restart. Must happen before the
+        // WebView2 environment starts, because it locks the Login Data database.
+        try
+        {
+            if (File.Exists(AppPaths.PendingLoginsFile))
+                ChromiumImport.ApplyPendingPasswords(AppPaths.PendingLoginsFile, AppPaths.WebViewLoginData);
+        }
+        catch { }
 
         try
         {
