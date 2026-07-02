@@ -21,14 +21,18 @@ Brave keeps every tab's renderer fully alive, plus a stack of background service
 - **discards** long-idle tabs entirely (renderer torn down; the page reloads when you click back),
 - ships none of Brave's extra services, and blocks ads/trackers natively.
 
-Measured (Release build, 7 real content tabs):
+Measured head-to-head — **the same 8 tabs**, fresh profile, whole process tree (see the full
+[memory case study](docs/memory-case-study.md)):
 
-| State | RAM |
-|---|---|
-| all 7 tabs loaded | ~1.4 GB |
-| 6 background tabs discarded | ~0.7 GB |
+| Browser | RAM | vs Wisp |
+|---|---:|---:|
+| **Wisp** (background tabs slept) | **711 MB** | — |
+| Wisp (all 8 live) | 2,204 MB | 3.1× |
+| Brave | 2,615 MB | 3.7× |
+| Chrome | 4,669 MB | 6.6× |
 
-The same 7-tab session in Brave was using ~7 GB.
+In normal use Wisp holds the same 8 sites in **~73% less RAM than Brave and ~85% less than Chrome** —
+and it's lighter even with every tab live.
 
 > Any Chromium browser uses similar RAM *per live tab* — the win is not keeping idle tabs live.
 
