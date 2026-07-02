@@ -35,6 +35,7 @@ public partial class MainWindow : Window
     private readonly string? _privateUdf;
     private readonly string? _startupUrl;
     private readonly DispatcherTimer _sessionTimer;
+    private readonly DispatcherTimer _audioNameTimer;
     private DispatcherTimer? _toastTimer;
 
     private static readonly string[] Engines = { "Google", "DuckDuckGo", "Brave Search", "Bing" };
@@ -65,6 +66,15 @@ public partial class MainWindow : Window
 
         _sessionTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(4) };
         _sessionTimer.Tick += (_, _) => { _sessionTimer.Stop(); if (!_isPrivate) SessionStore.Save(_tabs.Snapshot()); };
+
+        // Show up as "Wisp" (not "Microsoft Edge WebView2") in the Windows Volume Mixer.
+        _audioNameTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2.5) };
+        _audioNameTimer.Tick += (_, _) =>
+        {
+            if (_tabs.Tabs.Any(t => t.IsPlayingAudio))
+                AudioSessionNaming.Apply(_isPrivate ? "Wisp (Private)" : "Wisp", (Environment.ProcessPath ?? "") + ",0");
+        };
+        _audioNameTimer.Start();
 
         RegisterShortcuts();
         PreviewKeyDown += (_, e) =>

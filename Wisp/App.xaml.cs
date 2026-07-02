@@ -25,9 +25,15 @@ public partial class App : Application
     private Mutex? _mutex;
     private MainWindow? _main;
 
+    [System.Runtime.InteropServices.DllImport("shell32.dll")]
+    private static extern int SetCurrentProcessExplicitAppUserModelID(
+        [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPWStr)] string appId);
+
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        // Identify the app to Windows as "Wisp" (taskbar grouping, mixer, notifications).
+        try { SetCurrentProcessExplicitAppUserModelID("Wisp.Browser"); } catch { }
         var startupUrl = ParseArg(e.Args);
 
         _mutex = new Mutex(true, MutexName, out bool isNew);
