@@ -2099,6 +2099,13 @@ public partial class MainWindow : Window
         Add(Key.F11, ModifierKeys.None, ToggleFullscreen);
         Add(Key.P, ModifierKeys.Control, PrintActive);
         Add(Key.H, ModifierKeys.Control, OpenHistoryPage);
+        Add(Key.F12, ModifierKeys.None, OpenDevTools);
+        Add(Key.I, ModifierKeys.Control | ModifierKeys.Shift, OpenDevTools);
+    }
+
+    private void OpenDevTools()
+    {
+        try { _tabs.Active?.View?.CoreWebView2?.OpenDevToolsWindow(); } catch { }
     }
 
     /// <summary>Shortcuts relayed from web content (fired on the UI thread).</summary>
@@ -2118,6 +2125,7 @@ public partial class MainWindow : Window
             case "fullscreen": ToggleFullscreen(); break;
             case "print": PrintActive(); break;
             case "history": OpenHistoryPage(); break;
+            case "devtools": OpenDevTools(); break;
             default:
                 if (cmd.StartsWith("navigate:", StringComparison.Ordinal))
                 {

@@ -584,6 +584,8 @@ public class TabManager
     if (!e.isTrusted) return;
     var cmd = null;
     if (e.key === 'F11') cmd = 'fullscreen';
+    else if (e.key === 'F12') cmd = 'devtools';
+    else if (e.ctrlKey && e.shiftKey && (e.key || '').toLowerCase() === 'i') cmd = 'devtools';
     else if (e.ctrlKey && !e.altKey && !e.metaKey) {
       var k = (e.key || '').toLowerCase();
       if (k === 't') cmd = 'newtab';
