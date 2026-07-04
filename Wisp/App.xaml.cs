@@ -32,6 +32,14 @@ public partial class App : Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        // A single UI-thread exception should never take the whole browser down. Log it and keep going.
+        DispatcherUnhandledException += (_, ex) =>
+        {
+            try { File.AppendAllText(Path.Combine(AppPaths.DataDir, "crash.log"), $"{DateTime.Now:o}\n{ex.Exception}\n\n"); } catch { }
+            ex.Handled = true;
+        };
+
         // Identify the app to Windows as "Wisp" (taskbar grouping, mixer, notifications).
         try { SetCurrentProcessExplicitAppUserModelID("Wisp.Browser"); } catch { }
         var startupUrl = ParseArg(e.Args);

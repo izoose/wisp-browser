@@ -253,7 +253,7 @@
                                             <TextBlock Text="{Binding FileName}" Foreground="{StaticResource TextBrush}"
                                                        TextTrimming="CharacterEllipsis" FontSize="12"/>
                                             <ProgressBar Height="4" Margin="0,4" Minimum="0" Maximum="100"
-                                                         Value="{Binding Progress}" Foreground="{StaticResource AccentBrush}"
+                                                         Value="{Binding Progress, Mode=OneWay}" Foreground="{StaticResource AccentBrush}"
                                                          Background="{StaticResource AddressBrush}" BorderThickness="0"
                                                          Visibility="{Binding InProgress, Converter={StaticResource BoolToVis}}"/>
                                             <DockPanel>
