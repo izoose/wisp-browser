@@ -52,8 +52,9 @@
   .brand{display:flex;align-items:center;gap:11px;font-family:var(--sans);font-weight:600;font-size:1.15rem;letter-spacing:-.01em}
   .mark{width:26px;height:26px;flex:none}
   .nav-links{display:flex;align-items:center;gap:30px}
-  .nav-links a{color:var(--dim);font-size:.95rem;transition:color .2s,transform .12s ease;display:inline-block}
-  .nav-links a:hover{color:var(--text)}
+  .nav-links a{font-size:.95rem;transition:color .2s,transform .12s ease;display:inline-block}
+  .nav-links a:not(.btn){color:var(--dim)}
+  .nav-links a:not(.btn):hover{color:var(--text)}
   .nav-links a:not(.btn):active{transform:scale(.9);color:var(--accent-soft)}
   .btn:active{transform:translateY(0) scale(.96)!important}
   a.tapped{animation:tap .32s ease}
