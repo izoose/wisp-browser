@@ -400,6 +400,25 @@ public class TabManager
             if (tab == Active) FullScreenChanged?.Invoke(cw.ContainsFullScreenElement);
         };
 
+        // Add "Search <engine> for …" to the right-click menu (WebView2's default menu has no
+        // search entry because it has no configured engine). Open-link-in-new-tab already works
+        // through the default menu → NewWindowRequested.
+        cw.ContextMenuRequested += (_, e) =>
+        {
+            try
+            {
+                var sel = e.ContextMenuTarget.SelectionText?.Trim();
+                if (string.IsNullOrEmpty(sel)) return;
+                var label = sel.Length > 32 ? sel.Substring(0, 32).TrimEnd() + "…" : sel;
+                var search = _env.Core.CreateContextMenuItem(
+                    $"Search {_settings.SearchEngine} for “{label}”", null, CoreWebView2ContextMenuItemKind.Command);
+                search.CustomItemSelected += (_, _) => _ = NewTabAsync(_settings.BuildSearchUrl(sel), true);
+                e.MenuItems.Insert(0, search);
+                e.MenuItems.Insert(1, _env.Core.CreateContextMenuItem("", null, CoreWebView2ContextMenuItemKind.Separator));
+            }
+            catch { }
+        };
+
         // Native ad/tracker blocking — block requests to known ad domains at the network level.
         cw.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.All);
         cw.WebResourceRequested += (_, e) =>
