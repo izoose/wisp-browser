@@ -365,6 +365,10 @@ public class TabManager
 
         cw.Settings.IsReputationCheckingRequired = false; // no SmartScreen URL calls
         cw.Settings.AreDefaultScriptDialogsEnabled = false; // we render alert/confirm/prompt ourselves
+        // Let our shortcuts (Ctrl+F, Ctrl+T, …) reach the page even when web content has focus —
+        // otherwise Chromium swallows them as browser accelerators and, having no find UI, Ctrl+F
+        // just does nothing.
+        cw.Settings.AreBrowserAcceleratorKeysEnabled = false;
         cw.Profile.PreferredColorScheme = CoreWebView2PreferredColorScheme.Dark;
         cw.ScriptDialogOpening += (_, e) => ScriptDialogRequested?.Invoke(e);
 
