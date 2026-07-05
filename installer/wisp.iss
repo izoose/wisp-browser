@@ -59,4 +59,5 @@ Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "Launch Wisp"; Flags: nowait postinstall skipifsilent
+; Launch after install — including silent (auto-update) installs, so the app relaunches itself.
+Filename: "{app}\{#MyAppExeName}"; Description: "Launch Wisp"; Flags: nowait postinstall

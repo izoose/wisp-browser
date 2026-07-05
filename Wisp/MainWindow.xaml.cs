@@ -1385,8 +1385,11 @@ public partial class MainWindow : Window
         if (_pendingUpdate == null) return;
         ShowToast("Downloading update — Wisp will restart to finish…");
         bool ok = await Updater.DownloadAndRunAsync(_pendingUpdate.SetupUrl);
-        if (!ok) ShowToast("Couldn't download the update — try again later");
-        // On success the installer closes and relaunches Wisp itself.
+        if (!ok) { ShowToast("Couldn't download the update — try again later"); return; }
+        // Close ourselves so the installer can replace files and relaunch the new version cleanly
+        // (also frees the single-instance lock so the new copy can actually start).
+        await Task.Delay(1200);
+        Application.Current.Shutdown();
     }
 
     private void UpdateLater_Click(object sender, RoutedEventArgs e) => UpdatePopup.IsOpen = false;

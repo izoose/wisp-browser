@@ -59,10 +59,14 @@ public static class Updater
             var tmp = Path.Combine(Path.GetTempPath(), "WispSetup-update.exe");
             var bytes = await Http.GetByteArrayAsync(setupUrl);
             await File.WriteAllBytesAsync(tmp, bytes);
+            // /CLOSEAPPLICATIONS lets the installer wait for our files to unlock; the app then
+            // shuts itself down (see the caller) and the installer's post-install step relaunches
+            // the new version. We don't use /RESTARTAPPLICATIONS because it relaunches whatever path
+            // was closed — wrong when the running copy and the install target differ.
             Process.Start(new ProcessStartInfo
             {
                 FileName = tmp,
-                Arguments = "/SILENT /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS /NOICONS /SP-",
+                Arguments = "/SILENT /CLOSEAPPLICATIONS /NOICONS /SP-",
                 UseShellExecute = true,
             });
             return true;
