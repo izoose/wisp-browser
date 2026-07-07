@@ -437,6 +437,39 @@ public class TabManager
             catch { }
         };
 
+        // Site permission prompts (camera/mic/location/notifications): show a Wisp-styled prompt
+        // and remember the choice per origin so we don't keep re-asking.
+        cw.PermissionRequested += (_, e) =>
+        {
+            var what = PermissionLabel(e.PermissionKind);
+            if (what == null) return; // unknown kind — let WebView2 use its own prompt
+
+            string origin; try { origin = new Uri(e.Uri).GetLeftPart(UriPartial.Authority); } catch { origin = e.Uri; }
+            var key = origin + "|" + e.PermissionKind;
+            if (_settings.SitePermissions.TryGetValue(key, out var remembered))
+            {
+                e.State = remembered ? CoreWebView2PermissionState.Allow : CoreWebView2PermissionState.Deny;
+                e.Handled = true;
+                return;
+            }
+
+            var deferral = e.GetDeferral();
+            _host.Dispatcher.InvokeAsync(() =>
+            {
+                try
+                {
+                    string host; try { host = new Uri(e.Uri).Host; } catch { host = origin; }
+                    var owner = Window.GetWindow(_host);
+                    bool allow = owner != null && PromptDialog.AllowBlock(owner, host, $"{host} wants to {what}.");
+                    _settings.SitePermissions[key] = allow;
+                    _settings.Save();
+                    e.State = allow ? CoreWebView2PermissionState.Allow : CoreWebView2PermissionState.Deny;
+                }
+                catch { e.State = CoreWebView2PermissionState.Default; }
+                finally { deferral.Complete(); }
+            });
+        };
+
         cw.IsDocumentPlayingAudioChanged += (_, _) => tab.IsPlayingAudio = cw.IsDocumentPlayingAudio;
         cw.IsMutedChanged += (_, _) => tab.IsMuted = cw.IsMuted;
         if (tab.IsMuted) cw.IsMuted = true; // restore mute after a discard/recreate
@@ -552,6 +585,17 @@ public class TabManager
         try { return new Uri(url).Host is { Length: > 0 } h ? h : url; }
         catch { return url; }
     }
+
+    /// <summary>Friendly verb for a permission prompt, or null for kinds we let WebView2 handle.</summary>
+    private static string? PermissionLabel(CoreWebView2PermissionKind kind) => kind switch
+    {
+        CoreWebView2PermissionKind.Microphone => "use your microphone",
+        CoreWebView2PermissionKind.Camera => "use your camera",
+        CoreWebView2PermissionKind.Geolocation => "know your location",
+        CoreWebView2PermissionKind.Notifications => "show notifications",
+        CoreWebView2PermissionKind.ClipboardRead => "read your clipboard",
+        _ => null,
+    };
 
     private static async Task LoadFaviconAsync(BrowserTab tab, CoreWebView2 cw)
     {

@@ -462,6 +462,61 @@ public static class ChromiumImport
 
     private static void TryDelete(string path) { try { if (File.Exists(path)) File.Delete(path); } catch { } }
 
+    // ---- reading/deleting Wisp's own saved logins (password manager) ------------------
+
+    public record SavedLogin(long Id, string Origin, string Username, string Password);
+
+    /// <summary>Reads and decrypts Wisp's own saved logins for the password manager.</summary>
+    public static List<SavedLogin> ReadWispLogins()
+    {
+        var list = new List<SavedLogin>();
+        if (!File.Exists(AppPaths.WebViewLoginData) || !File.Exists(AppPaths.WebViewLocalState)) return list;
+        byte[] key;
+        try { key = GetMasterKey(AppPaths.WebViewLocalState); } catch { return list; }
+
+        var tmp = CopyLocked(AppPaths.WebViewLoginData);
+        try
+        {
+            using var conn = new SqliteConnection($"Data Source={tmp};Pooling=False");
+            conn.Open();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT rowid, origin_url, username_value, password_value, blacklisted_by_user FROM logins";
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+            {
+                if (!r.IsDBNull(4) && r.GetInt64(4) != 0) continue; // "never save" entries
+                var enc = r.IsDBNull(3) ? Array.Empty<byte>() : r.GetFieldValue<byte[]>(3);
+                var plain = DecryptRaw(enc, key);
+                var pw = plain == null ? "" : Encoding.UTF8.GetString(plain);
+                var user = r.IsDBNull(2) ? "" : r.GetString(2);
+                if (string.IsNullOrEmpty(user) && string.IsNullOrEmpty(pw)) continue;
+                list.Add(new SavedLogin(r.GetInt64(0), r.IsDBNull(1) ? "" : r.GetString(1), user, pw));
+            }
+        }
+        catch { }
+        finally { SafeDelete(tmp); }
+        return list;
+    }
+
+    /// <summary>Deletes a saved login by rowid from Wisp's live Login Data. Waits briefly for the
+    /// DB lock; returns false if it couldn't (e.g. WebView2 was mid-write — the caller can retry).</summary>
+    public static bool DeleteWispLogin(long rowid)
+    {
+        if (!File.Exists(AppPaths.WebViewLoginData)) return false;
+        try
+        {
+            using var conn = new SqliteConnection($"Data Source={AppPaths.WebViewLoginData};Pooling=False");
+            conn.Open();
+            using (var busy = conn.CreateCommand()) { busy.CommandText = "PRAGMA busy_timeout=3000"; busy.ExecuteNonQuery(); }
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "DELETE FROM logins WHERE rowid=@id";
+            cmd.Parameters.AddWithValue("@id", rowid);
+            cmd.ExecuteNonQuery();
+            return true;
+        }
+        catch { return false; }
+    }
+
     /// <summary>Decrypts a Chromium blob (v10/v11 AES-GCM, or legacy DPAPI) to raw bytes.</summary>
     private static byte[]? DecryptRaw(byte[] enc, byte[] key)
     {

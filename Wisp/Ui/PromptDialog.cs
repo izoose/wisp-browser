@@ -33,8 +33,12 @@ public static class PromptDialog
     public static string? PromptWeb(Window owner, string? site, string message, string initial)
         => Run(owner, message, site, hasInput: true, initial, hasCancel: true, "OK");
 
+    /// <summary>Site permission prompt. True = Allow, false = Block.</summary>
+    public static bool AllowBlock(Window owner, string site, string message)
+        => Run(owner, message, site, hasInput: false, "", hasCancel: true, "Allow", cancelText: "Block") != null;
+
     private static string? Run(Window owner, string title, string? subtitle, bool hasInput,
-        string initial, bool hasCancel, string okText)
+        string initial, bool hasCancel, string okText, string cancelText = "Cancel")
     {
         var win = new Window
         {
@@ -92,7 +96,7 @@ public static class PromptDialog
 
         if (hasCancel)
         {
-            var cancel = Make("Cancel", false);
+            var cancel = Make(cancelText, false);
             cancel.IsCancel = true;
             cancel.Click += (_, _) => win.DialogResult = false;
             buttons.Children.Add(cancel);

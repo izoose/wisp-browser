@@ -1702,6 +1702,175 @@ public partial class MainWindow : Window
   document.head.appendChild(s);
 })();";
 
+    private async void PictureInPicture()
+    {
+        var cw = _tabs.Active?.View?.CoreWebView2;
+        if (cw == null) return;
+        try
+        {
+            var r = await cw.ExecuteScriptAsync(PipScript);
+            if (r == "\"novideo\"") ShowToast("No video on this page to pop out");
+        }
+        catch { }
+    }
+
+    // Pops the playing (or largest) video into a floating always-on-top window, or closes it if
+    // one is already open. Runs in the page so it inherits the menu click's user activation.
+    private const string PipScript = @"
+(function(){
+  try {
+    if (document.pictureInPictureElement) { document.exitPictureInPicture(); return 'exit'; }
+    var vids = [].slice.call(document.querySelectorAll('video')).filter(function(v){ return v.readyState > 0 && !v.disablePictureInPicture; });
+    if (!vids.length) return 'novideo';
+    var v = vids.find(function(x){ return !x.paused; })
+         || vids.sort(function(a,b){ return (b.clientWidth*b.clientHeight)-(a.clientWidth*a.clientHeight); })[0];
+    v.requestPictureInPicture().catch(function(e){});
+    return 'ok';
+  } catch(e){ return 'err'; }
+})();";
+
+    private void OpenPasswords()
+    {
+        if (_isPrivate) { ShowToast("Passwords aren't available in a private window"); return; }
+        new PasswordsWindow(this).Show();
+    }
+
+    // ---- clear browsing data ---------------------------------------------------------
+
+    private async void ClearBrowsingData()
+    {
+        var profile = _tabs.Active?.View?.CoreWebView2?.Profile;
+        if (profile == null) { ShowToast("Open a tab first"); return; }
+
+        var choice = ClearDataDialog.Show(this);
+        if (choice == null) return;
+
+        CoreWebView2BrowsingDataKinds kinds = 0;
+        if (choice.Cache) kinds |= CoreWebView2BrowsingDataKinds.DiskCache | CoreWebView2BrowsingDataKinds.CacheStorage;
+        if (choice.Cookies) kinds |= CoreWebView2BrowsingDataKinds.Cookies | CoreWebView2BrowsingDataKinds.AllDomStorage;
+        if (choice.History) kinds |= CoreWebView2BrowsingDataKinds.BrowsingHistory;
+        if (choice.Downloads) kinds |= CoreWebView2BrowsingDataKinds.DownloadHistory;
+
+        if (kinds != 0)
+        {
+            try
+            {
+                if (choice.Range is { } span)
+                    await profile.ClearBrowsingDataAsync(kinds, DateTime.Now - span, DateTime.Now);
+                else
+                    await profile.ClearBrowsingDataAsync(kinds);
+            }
+            catch { }
+        }
+
+        // Also clear Wisp's own stores so the omnibox/history page reflect the wipe.
+        if (choice.History) _history.Clear();
+        if (choice.Downloads) _downloads.Clear();
+        if (choice.Cookies && _settings.SitePermissions.Count > 0)
+        {
+            _settings.SitePermissions.Clear(); // site data gone -> forget remembered permissions
+            _settings.Save();
+        }
+
+        ShowToast("Browsing data cleared");
+    }
+
+    // ---- screenshot / capture --------------------------------------------------------
+
+    private async void CaptureScreenshot()
+    {
+        var cw = _tabs.Active?.View?.CoreWebView2;
+        if (cw == null) { ShowToast("Open a page first"); return; }
+        try
+        {
+            var host = HostOf(cw.Source);
+            var safe = string.Join("_", host.Split(System.IO.Path.GetInvalidFileNameChars()));
+            var dir = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+            var name = $"Wisp_{safe}_{DateTime.Now:yyyyMMdd_HHmmss}.png";
+            var path = System.IO.Path.Combine(dir, name);
+
+            await using (var fs = new System.IO.FileStream(path, System.IO.FileMode.Create))
+                await cw.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, fs);
+
+            // Also drop it on the clipboard for quick pasting.
+            try
+            {
+                var bmp = new BitmapImage();
+                bmp.BeginInit(); bmp.CacheOption = BitmapCacheOption.OnLoad; bmp.UriSource = new Uri(path); bmp.EndInit();
+                Clipboard.SetImage(bmp);
+            }
+            catch { }
+
+            ShowToast($"Screenshot saved to Pictures & copied");
+        }
+        catch { ShowToast("Couldn't capture the page"); }
+    }
+
+    // ---- install site as app (standalone window, shared logins) ----------------------
+
+    private async void InstallAsApp()
+    {
+        var tab = _tabs.Active;
+        var cw = tab?.View?.CoreWebView2;
+        if (tab == null || cw == null) return;
+        var url = cw.Source;
+        if (string.IsNullOrWhiteSpace(url) || url.StartsWith("about:") ||
+            url.StartsWith("wisp", StringComparison.OrdinalIgnoreCase) || url.StartsWith("edge:"))
+        { ShowToast("Open a website first, then install it as an app"); return; }
+
+        await OpenAppWindowAsync(url, string.IsNullOrWhiteSpace(tab.Title) ? HostOf(url) : tab.Title, tab.Favicon);
+        ShowToast("Opened as an app — it shares your logins");
+    }
+
+    /// <summary>Opens a URL in a chrome-less standalone window (its own WebView2 on the shared
+    /// environment, so cookies/logins carry over). Feels like a native app for a single site.</summary>
+    private async Task OpenAppWindowAsync(string url, string title, ImageSource? icon)
+    {
+        try
+        {
+            var wv = new WebView2();
+            var win = new Window
+            {
+                Title = title, Width = 1024, Height = 720, Content = wv,
+                WindowStartupLocation = WindowStartupLocation.CenterScreen,
+                Background = Brushes.Black, Icon = icon, ShowInTaskbar = true,
+            };
+            win.Show(); // show first so the WebView2 has a window to initialize into
+            await wv.EnsureCoreWebView2Async(_env.Core);
+            var acw = wv.CoreWebView2;
+            acw.Settings.IsReputationCheckingRequired = false;
+            acw.DocumentTitleChanged += (_, _) =>
+            { try { if (!string.IsNullOrWhiteSpace(acw.DocumentTitle)) win.Title = acw.DocumentTitle; } catch { } };
+            acw.NewWindowRequested += (_, e) => { _ = HandleAppPopupAsync(e); };
+            acw.WindowCloseRequested += (_, _) => { try { win.Close(); } catch { } };
+            win.Closed += (_, _) => { try { wv.Dispose(); } catch { } };
+            acw.Navigate(url);
+        }
+        catch { ShowToast("Couldn't open the app window"); }
+    }
+
+    /// <summary>Hosts popups (e.g. OAuth sign-in) opened from an app window.</summary>
+    private async Task HandleAppPopupAsync(CoreWebView2NewWindowRequestedEventArgs e)
+    {
+        var deferral = e.GetDeferral();
+        try
+        {
+            var wv = new WebView2();
+            var win = new Window
+            {
+                Title = "Wisp", Width = 480, Height = 640, Content = wv,
+                WindowStartupLocation = WindowStartupLocation.CenterScreen, Background = Brushes.Black,
+            };
+            win.Show();
+            await wv.EnsureCoreWebView2Async(_env.Core);
+            wv.CoreWebView2.Settings.IsReputationCheckingRequired = false;
+            wv.CoreWebView2.WindowCloseRequested += (_, _) => { try { win.Close(); } catch { } };
+            e.NewWindow = wv.CoreWebView2;
+            deferral.Complete();
+        }
+        catch { e.Handled = true; deferral.Complete(); }
+    }
+
     private void PrintActive()
     {
         var cw = _tabs.Active?.View?.CoreWebView2;
@@ -2013,11 +2182,16 @@ public partial class MainWindow : Window
             case "print": MenuPopup.IsOpen = false; PrintActive(); break;
             case "reader": MenuPopup.IsOpen = false; OpenReader(); break;
             case "translate": MenuPopup.IsOpen = false; TranslatePage(); break;
+            case "pip": MenuPopup.IsOpen = false; PictureInPicture(); break;
+            case "screenshot": MenuPopup.IsOpen = false; CaptureScreenshot(); break;
+            case "installapp": MenuPopup.IsOpen = false; InstallAsApp(); break;
+            case "cleardata": MenuPopup.IsOpen = false; ClearBrowsingData(); break;
             case "private": MenuPopup.IsOpen = false; OpenPrivate(); break;
             case "settings": MenuPopup.IsOpen = false; OpenSettings(); break;
             case "forcedark": ToggleForceDark(); break;
             case "search": CycleSearchEngine(); break;
             case "sleepnow": MenuPopup.IsOpen = false; await SleepNowAsync(); break;
+            case "passwords": MenuPopup.IsOpen = false; OpenPasswords(); break;
             case "import": MenuPopup.IsOpen = false; await StartImportAsync(); break;
             case "update": MenuPopup.IsOpen = false; await CheckForUpdatesAsync(manual: true); break;
             case "default": MenuPopup.IsOpen = false; MakeDefaultBrowser(); break;

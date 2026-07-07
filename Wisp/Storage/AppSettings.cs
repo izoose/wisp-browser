@@ -79,6 +79,10 @@ public class AppSettings
     /// <summary>Custom new-tab shortcut tiles. Null until first seeded from history; then user-managed.</summary>
     public System.Collections.Generic.List<Shortcut>? NewTabShortcuts { get; set; }
 
+    /// <summary>Remembered site permission decisions, keyed "origin|PermissionKind" -> allowed.
+    /// Cleared alongside cookies/site data.</summary>
+    public System.Collections.Generic.Dictionary<string, bool> SitePermissions { get; set; } = new();
+
     public static AppSettings Load()
     {
         try

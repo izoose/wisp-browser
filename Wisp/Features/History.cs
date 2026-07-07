@@ -66,4 +66,7 @@ public class History
     }
 
     public IEnumerable<HistoryEntry> Recent(int count) => Items.Take(count);
+
+    /// <summary>Wipes all recorded visits (used by Clear browsing data).</summary>
+    public void Clear() { Items.Clear(); Save(); }
 }

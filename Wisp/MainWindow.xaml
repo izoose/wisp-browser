@@ -406,12 +406,17 @@
                     <Button Content="Print…" Tag="print" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
                     <Button Content="Reader mode" Tag="reader" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
                     <Button Content="Translate to English" Tag="translate" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
+                    <Button Content="Picture-in-picture" Tag="pip" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
+                    <Button Content="Take screenshot" Tag="screenshot" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
+                    <Button Content="Install this site as an app" Tag="installapp" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
                     <Border Height="1" Background="{StaticResource EdgeBorderBrush}" Margin="4,6"/>
                     <Button Content="New private window" Tag="private" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
+                    <Button Content="Clear browsing data…" Tag="cleardata" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
                     <Button x:Name="ForceDarkBtn" Content="Force dark on all sites" Tag="forcedark" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
                     <Button x:Name="SearchEngineBtn" Content="Search: Google" Tag="search" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
                     <Border Height="1" Background="{StaticResource EdgeBorderBrush}" Margin="4,6"/>
                     <Button Content="Sleep background tabs now" Tag="sleepnow" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
+                    <Button Content="Passwords…" Tag="passwords" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
                     <Button Content="Import from another browser…" Tag="import" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
                     <Button Content="Set as default browser" Tag="default" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
                     <Button Content="Check for updates" Tag="update" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
