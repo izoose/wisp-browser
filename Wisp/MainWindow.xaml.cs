@@ -209,7 +209,12 @@ public partial class MainWindow : Window
 
         bool isNewTab = t.Url.StartsWith("https://wisp.newtab", StringComparison.OrdinalIgnoreCase);
         if (!AddressBox.IsKeyboardFocusWithin)
-            AddressBox.Text = isNewTab ? string.Empty : ForDisplay(t.Url);
+        {
+            _omniInternalEdit = true;
+            AddressBox.Text = !string.IsNullOrEmpty(t.AddressDraft) ? t.AddressDraft
+                : (isNewTab ? string.Empty : ForDisplay(t.Url));
+            _omniInternalEdit = false;
+        }
 
         Title = string.IsNullOrWhiteSpace(t.Title) ? "Wisp" : $"{t.Title} \u2014 Wisp";
 
@@ -691,6 +696,7 @@ public partial class MainWindow : Window
         if (!AddressBox.IsKeyboardFocusWithin) return;
 
         var raw = AddressBox.Text;
+        if (_tabs.Active != null) _tabs.Active.AddressDraft = raw;  // keep the draft per-tab
         var q = raw.Trim();
         if (q.Length == 0) { CloseOmni(); return; }
 
@@ -725,20 +731,40 @@ public partial class MainWindow : Window
             });
 
         // History + bookmark URL matches (favicons), most-recent first, deduped, skip the typed URL.
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { NormalizeUrl(q) };
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { NoQuery(NormalizeUrl(q)) };
+
+        // If typing a bare site name that matches a site we've been to, offer its homepage first.
+        if (!looksLikeUrl && !q.Contains('/') && !q.Contains(' ') && q.Length >= 2)
+        {
+            var host = _history.Items.Select(h => HostOf(h.Url))
+                .FirstOrDefault(hh => !string.IsNullOrEmpty(hh)
+                    && (hh.StartsWith("www.") ? hh.Substring(4) : hh).StartsWith(q, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrEmpty(host))
+            {
+                var root = "https://" + host;
+                if (seen.Add(NoQuery(NormalizeUrl(root))))
+                    _omniLocal.Add(new OmniItem
+                    {
+                        Kind = OmniKind.Nav, Primary = host.StartsWith("www.") ? host.Substring(4) : host,
+                        Secondary = "Homepage", Nav = root, UseFavicon = true, FaviconHost = host,
+                    });
+            }
+        }
+
         int added = 0;
         foreach (var h in _history.Items)
         {
             if (added >= 5) break;
             bool match = h.Url.Contains(q, StringComparison.OrdinalIgnoreCase)
                          || (h.Title?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false);
-            if (!match || !seen.Add(NormalizeUrl(h.Url))) continue;
+            // Dedupe ignoring the query string so near-identical deep links (…?gameSetTypeId=…) collapse.
+            if (!match || !seen.Add(NoQuery(NormalizeUrl(h.Url)))) continue;
             bool marked = _bookmarks.Contains(h.Url);
             _omniLocal.Add(new OmniItem
             {
                 Kind = marked ? OmniKind.Bookmark : OmniKind.History,
                 Primary = string.IsNullOrWhiteSpace(h.Title) ? ForDisplay(h.Url) : h.Title,
-                Secondary = ForDisplay(h.Url), Nav = h.Url,
+                Secondary = ForDisplay(NoQuery(h.Url)), Nav = h.Url,
                 UseFavicon = true, FaviconHost = HostOf(h.Url),
                 Removable = !marked,
             });
@@ -908,10 +934,15 @@ public partial class MainWindow : Window
         // Only complete when the caret is at the end and nothing is selected.
         if (AddressBox.SelectionLength > 0 || AddressBox.CaretIndex != rawTyped.Length) return;
 
+        // When typing a bare site name ("roblox"), complete to just the domain ("roblox.com") so
+        // you land on the homepage — not a deep path from history ("roblox.com/games/…"). Only once
+        // you've typed a "/" do we complete to a full path.
+        bool typingPath = q.Contains('/');
         foreach (var it in _omniLocal)
         {
             if (it.Kind == OmniKind.Search) continue;
-            var cand = StripScheme(it.Nav);
+            var full = StripScheme(it.Nav);
+            var cand = typingPath ? full : HostRoot(full);
             if (cand.Length <= q.Length) continue;
             if (!cand.StartsWith(q, StringComparison.OrdinalIgnoreCase)) continue;
 
@@ -922,6 +953,18 @@ public partial class MainWindow : Window
             _omniInternalEdit = false;
             return;
         }
+    }
+
+    private static string HostRoot(string strippedUrl)
+    {
+        int slash = strippedUrl.IndexOf('/');
+        return slash < 0 ? strippedUrl : strippedUrl.Substring(0, slash);
+    }
+
+    private static string NoQuery(string s)
+    {
+        int q = s.IndexOf('?');
+        return (q < 0 ? s : s.Substring(0, q)).TrimEnd('/');
     }
 
     private async Task NavigateOmniAsync(string navText)
@@ -1256,14 +1299,15 @@ public partial class MainWindow : Window
     /// AllowSetForegroundWindow (see App) as a belt-and-suspenders.</summary>
     public void BringToForeground()
     {
-        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
         Show();
 
         IntPtr hwnd;
         try { hwnd = new System.Windows.Interop.WindowInteropHelper(this).EnsureHandle(); }
         catch { Activate(); return; }
 
-        ShowWindow(hwnd, SW_RESTORE);
+        // Only un-minimize; never touch a normal/maximized window (SW_RESTORE would un-maximize
+        // it into an odd size). Restore returns a minimized window to its previous state.
+        if (WindowState == WindowState.Minimized) ShowWindow(hwnd, SW_RESTORE);
 
         var fg = GetForegroundWindow();
         uint fgThread = fg == IntPtr.Zero ? 0 : GetWindowThreadProcessId(fg, out _);
@@ -1384,10 +1428,15 @@ public partial class MainWindow : Window
         UpdatePopup.IsOpen = false;
         if (_pendingUpdate == null) return;
         ShowToast("Downloading update — Wisp will restart to finish…");
-        bool ok = await Updater.DownloadAndRunAsync(_pendingUpdate.SetupUrl);
+
+        // Prefer the in-place update (updates wherever Wisp runs from, no install-location mismatch).
+        bool ok = _pendingUpdate.ZipUrl != null
+            ? await Updater.ApplyInPlaceAsync(_pendingUpdate.ZipUrl)
+            : _pendingUpdate.SetupUrl != null && await Updater.DownloadAndRunAsync(_pendingUpdate.SetupUrl);
+
         if (!ok) { ShowToast("Couldn't download the update — try again later"); return; }
-        // Close ourselves so the installer can replace files and relaunch the new version cleanly
-        // (also frees the single-instance lock so the new copy can actually start).
+        // Close so the helper can replace our files and relaunch the new version (also frees the
+        // single-instance lock so the new copy can actually start).
         await Task.Delay(1200);
         Application.Current.Shutdown();
     }
@@ -1757,9 +1806,12 @@ public partial class MainWindow : Window
     private void Address_GotFocus(object sender, KeyboardFocusChangedEventArgs e)
     {
         var t = _tabs.Active;
-        // Reveal the full URL without triggering the suggestion dropdown (only typing should).
         _omniInternalEdit = true;
-        if (t != null && !t.Url.StartsWith("https://wisp.newtab", StringComparison.OrdinalIgnoreCase))
+        // If the user was mid-typing here, keep their draft; otherwise reveal the FULL url (with
+        // https://) so selecting + copying gives the real, complete link.
+        if (t != null && !string.IsNullOrEmpty(t.AddressDraft))
+            AddressBox.Text = t.AddressDraft;
+        else if (t != null && !t.Url.StartsWith("https://wisp.newtab", StringComparison.OrdinalIgnoreCase))
             AddressBox.Text = t.Url;
         AddressBox.SelectAll();
         _omniInternalEdit = false;

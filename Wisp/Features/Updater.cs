@@ -23,9 +23,9 @@ public static class Updater
     public static Version Current =>
         Assembly.GetEntryAssembly()?.GetName().Version is { } v ? new Version(v.Major, v.Minor, v.Build < 0 ? 0 : v.Build) : new Version(1, 0, 0);
 
-    public record UpdateInfo(Version Version, string Tag, string SetupUrl);
+    public record UpdateInfo(Version Version, string Tag, string? SetupUrl, string? ZipUrl);
 
-    /// <summary>Returns info about a newer release, or null if up to date / offline / no installer asset.</summary>
+    /// <summary>Returns info about a newer release, or null if up to date / offline / no asset.</summary>
     public static async Task<UpdateInfo?> CheckAsync()
     {
         try
@@ -37,14 +37,64 @@ public static class Updater
             var v = ParseVersion(tag);
             if (v == null || v <= Current) return null;
 
-            string? setup = null;
+            string? setup = null, zip = null;
             if (root.TryGetProperty("assets", out var assets))
                 foreach (var a in assets.EnumerateArray())
-                    if (string.Equals(a.GetProperty("name").GetString(), "WispSetup.exe", StringComparison.OrdinalIgnoreCase))
-                        setup = a.GetProperty("browser_download_url").GetString();
-            return setup == null ? null : new UpdateInfo(v, tag, setup);
+                {
+                    var name = a.GetProperty("name").GetString() ?? "";
+                    var url = a.GetProperty("browser_download_url").GetString();
+                    if (string.Equals(name, "WispSetup.exe", StringComparison.OrdinalIgnoreCase)) setup = url;
+                    else if (name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) && name.Contains("portable", StringComparison.OrdinalIgnoreCase)) zip = url;
+                }
+            return (setup == null && zip == null) ? null : new UpdateInfo(v, tag, setup, zip);
         }
         catch { return null; }
+    }
+
+    /// <summary>Updates Wisp in place — downloads the portable build, then a helper waits for this
+    /// process to exit, copies the new files over wherever Wisp is installed, and relaunches it.
+    /// Works no matter where Wisp runs from (no fixed install location, no path mismatch).</summary>
+    public static async Task<bool> ApplyInPlaceAsync(string zipUrl)
+    {
+        try
+        {
+            var appDir = AppContext.BaseDirectory.TrimEnd('\\', '/');
+            var exe = Path.Combine(appDir, "Wisp.exe");
+            var tmpZip = Path.Combine(Path.GetTempPath(), "wisp_update.zip");
+            var tmpDir = Path.Combine(Path.GetTempPath(), "wisp_update_extract");
+
+            var bytes = await Http.GetByteArrayAsync(zipUrl);
+            await File.WriteAllBytesAsync(tmpZip, bytes);
+            if (Directory.Exists(tmpDir)) Directory.Delete(tmpDir, true);
+            System.IO.Compression.ZipFile.ExtractToDirectory(tmpZip, tmpDir);
+
+            int pid = Environment.ProcessId;
+            var bat = Path.Combine(Path.GetTempPath(), "wisp_apply_update.cmd");
+            var script =
+                "@echo off\r\n" +
+                ":waitloop\r\n" +
+                $"tasklist /fi \"PID eq {pid}\" 2>nul | find \"{pid}\" >nul\r\n" +
+                "if not errorlevel 1 ( timeout /t 1 /nobreak >nul & goto waitloop )\r\n" +
+                "timeout /t 1 /nobreak >nul\r\n" +
+                $"robocopy \"{tmpDir}\" \"{appDir}\" /E /IS /IT /R:3 /W:1 /NFL /NDL /NJH /NJS /NP >nul\r\n" +
+                $"start \"\" \"{exe}\"\r\n" +
+                "timeout /t 2 /nobreak >nul\r\n" +
+                $"rmdir /s /q \"{tmpDir}\" >nul 2>&1\r\n" +
+                $"del \"{tmpZip}\" >nul 2>&1\r\n" +
+                "del \"%~f0\" >nul 2>&1\r\n";
+            await File.WriteAllTextAsync(bat, script);
+
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = $"/c \"{bat}\"",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden,
+            });
+            return true;
+        }
+        catch { return false; }
     }
 
     private static Version? ParseVersion(string tag)

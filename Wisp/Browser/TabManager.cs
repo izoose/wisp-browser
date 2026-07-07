@@ -458,6 +458,7 @@ public class TabManager
         cw.SourceChanged += (_, _) =>
         {
             tab.BlockedCount = 0; // fresh page — reset the per-site block tally
+            tab.AddressDraft = null; // navigated — the typed draft is stale
             tab.Url = cw.Source;
             PageVisited?.Invoke(cw.Source, tab.Title);
             if (tab == Active) ActiveTabUpdated?.Invoke();

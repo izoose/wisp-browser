@@ -95,6 +95,10 @@ public class BrowserTab : INotifyPropertyChanged
     /// right next to its parent instead of at the end of the strip. Runtime-only.</summary>
     public BrowserTab? Opener { get; set; }
 
+    /// <summary>Unsubmitted text the user typed in the address bar, kept per-tab so switching
+    /// away and back doesn't erase it. Cleared on navigation.</summary>
+    public string? AddressDraft { get; set; }
+
     /// <summary>The live control, or null when the tab is discarded.</summary>
     public WebView2? View { get; set; }
 
