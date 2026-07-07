@@ -688,29 +688,46 @@ public class TabManager
 (function () {
   if (!/(^|\.)youtube(-nocookie)?\.com$/.test(location.hostname)) return;
   var css = ['.ytp-ad-module','.ytp-ad-overlay-container','.ytp-ad-image-overlay','.ytp-ad-overlay-slot',
+    '.ytp-ad-player-overlay','.ytp-ad-player-overlay-instream-info','.ytp-suggested-action',
     'ytd-ad-slot-renderer','ytd-in-feed-ad-layout-renderer','ytd-banner-promo-renderer',
     'ytd-statement-banner-renderer','#masthead-ad','ytd-promoted-sparse-video-renderer',
     'ytd-companion-slot-renderer','ytd-promoted-video-renderer','ytd-display-ad-renderer',
-    '#player-ads','.ytd-ad-slot-renderer'].join(',') + '{display:none!important}';
+    '#player-ads','.ytd-ad-slot-renderer','ytmusic-mealbar-promo-renderer',
+    'ytd-popup-container:has(ytd-enforcement-message-view-model)','tp-yt-iron-overlay-backdrop'
+    ].join(',') + '{display:none!important}';
   function addStyle(){ if (document.getElementById('wisp-yt')) return; var s=document.createElement('style'); s.id='wisp-yt'; s.textContent=css; (document.head||document.documentElement).appendChild(s); }
   addStyle();
   var weMuted = false;
+  // YouTube's ""ad blockers violate our terms"" popup pauses the video — remove it and resume.
+  function killNag(){
+    var em = document.querySelector('ytd-enforcement-message-view-model, .ytd-enforcement-message-view-model');
+    if (!em) return;
+    var pop = em.closest('ytd-popup-container') || em.closest('tp-yt-paper-dialog') || em;
+    try { pop.remove(); } catch (e) {}
+    document.querySelectorAll('tp-yt-iron-overlay-backdrop').forEach(function(b){ try { b.remove(); } catch (e) {} });
+    document.documentElement.style.overflow=''; if (document.body) document.body.style.overflow='';
+    var v = document.querySelector('video'); if (v && v.paused) { try { v.play(); } catch (e) {} }
+  }
   function tick(){
     try {
       addStyle();
+      killNag();
       var player = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
       var video = document.querySelector('video.html5-main-video') || document.querySelector('video');
-      var skip = document.querySelector('.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button');
-      if (skip) skip.click();
-      var ad = player && player.classList.contains('ad-showing');
-      if (ad && video) {
+      if (!video) return;
+      document.querySelectorAll('.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button, .ytp-ad-skip-button-container button')
+        .forEach(function(b){ try { b.click(); } catch (e) {} });
+      var ad = player && (player.classList.contains('ad-showing') || player.classList.contains('ad-interrupting'));
+      if (ad) {
+        // Seek to the end of the ad — works for skippable and unskippable pre/mid-rolls.
         if (isFinite(video.duration) && video.duration > 0) video.currentTime = video.duration;
         if (!video.muted) { video.muted = true; weMuted = true; }
-      } else if (weMuted && video) {
+        if (video.paused) { try { video.play(); } catch (e) {} }
+      } else if (weMuted) {
         video.muted = false; weMuted = false;
       }
     } catch (e) {}
   }
-  setInterval(tick, 250);
+  setInterval(tick, 200);
 })();";
 }

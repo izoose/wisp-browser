@@ -119,7 +119,7 @@
 
                 <!-- New-tab button: always visible, right after the tab strip -->
                 <Button x:Name="NewTabBtn" Grid.Column="1" Content="&#xE710;" Click="NewTab_Click"
-                        Style="{StaticResource ToolButtonStyle}" Margin="4,6,0,0" VerticalAlignment="Top"
+                        Style="{StaticResource ToolButtonStyle}" Margin="4,0,0,0" VerticalAlignment="Bottom"
                         WindowChrome.IsHitTestVisibleInChrome="True" ToolTip="New tab (Ctrl+T)"/>
 
                 <!-- Window controls -->
