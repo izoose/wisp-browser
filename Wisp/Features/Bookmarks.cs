@@ -73,7 +73,7 @@ public class Bookmarks
         try
         {
             AppPaths.EnsureDataDir();
-            File.WriteAllText(AppPaths.BookmarksFile,
+            AppPaths.WriteAtomic(AppPaths.BookmarksFile,
                 JsonSerializer.Serialize(this, new JsonSerializerOptions
                 {
                     WriteIndented = true,

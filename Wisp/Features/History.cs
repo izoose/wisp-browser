@@ -36,7 +36,7 @@ public class History
         try
         {
             AppPaths.EnsureDataDir();
-            File.WriteAllText(AppPaths.HistoryFile,
+            AppPaths.WriteAtomic(AppPaths.HistoryFile,
                 JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
         }
         catch { /* best effort */ }

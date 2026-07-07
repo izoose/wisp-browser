@@ -104,7 +104,7 @@ public class AppSettings
         try
         {
             AppPaths.EnsureDataDir();
-            File.WriteAllText(AppPaths.SettingsFile,
+            AppPaths.WriteAtomic(AppPaths.SettingsFile,
                 JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
         }
         catch { /* best effort */ }

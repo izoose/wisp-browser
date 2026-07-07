@@ -28,4 +28,14 @@ public static class AppPaths
     public static string WebViewLoginData => Path.Combine(WebViewProfileDir, "Default", "Login Data");
 
     public static void EnsureDataDir() => Directory.CreateDirectory(DataDir);
+
+    /// <summary>Writes a file crash-safely: write a temp file, then atomically replace the target.
+    /// A crash/power-loss mid-write leaves the old file intact instead of a truncated/empty one.</summary>
+    public static void WriteAtomic(string path, string content)
+    {
+        var tmp = path + ".tmp";
+        File.WriteAllText(tmp, content);
+        if (File.Exists(path)) File.Replace(tmp, path, null); // atomic swap on NTFS
+        else File.Move(tmp, path);
+    }
 }

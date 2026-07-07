@@ -68,6 +68,12 @@ public static class Updater
             if (Directory.Exists(tmpDir)) Directory.Delete(tmpDir, true);
             System.IO.Compression.ZipFile.ExtractToDirectory(tmpZip, tmpDir);
 
+            // The zip may wrap everything in a top-level folder; copy from wherever Wisp.exe
+            // actually lives, and abort if it isn't in the archive (don't relaunch the old binary).
+            var matches = Directory.GetFiles(tmpDir, "Wisp.exe", SearchOption.AllDirectories);
+            if (matches.Length == 0) return false;
+            var srcDir = Path.GetDirectoryName(matches[0])!;
+
             int pid = Environment.ProcessId;
             var bat = Path.Combine(Path.GetTempPath(), "wisp_apply_update.cmd");
             var script =
@@ -76,7 +82,7 @@ public static class Updater
                 $"tasklist /fi \"PID eq {pid}\" 2>nul | find \"{pid}\" >nul\r\n" +
                 "if not errorlevel 1 ( timeout /t 1 /nobreak >nul & goto waitloop )\r\n" +
                 "timeout /t 1 /nobreak >nul\r\n" +
-                $"robocopy \"{tmpDir}\" \"{appDir}\" /E /IS /IT /R:3 /W:1 /NFL /NDL /NJH /NJS /NP >nul\r\n" +
+                $"robocopy \"{srcDir}\" \"{appDir}\" /E /IS /IT /R:3 /W:1 /NFL /NDL /NJH /NJS /NP >nul\r\n" +
                 $"start \"\" \"{exe}\"\r\n" +
                 "timeout /t 2 /nobreak >nul\r\n" +
                 $"rmdir /s /q \"{tmpDir}\" >nul 2>&1\r\n" +
@@ -98,7 +104,10 @@ public static class Updater
     }
 
     private static Version? ParseVersion(string tag)
-        => Version.TryParse(tag.TrimStart('v', 'V'), out var v) ? v : null;
+        // Normalize to 3 components so a 4-part tag (v1.2.0.1) can't compare as newer than Current.
+        => Version.TryParse(tag.TrimStart('v', 'V'), out var v)
+            ? new Version(v.Major, v.Minor, v.Build < 0 ? 0 : v.Build)
+            : null;
 
     /// <summary>Downloads the installer and runs it silently. Inno Setup closes this instance,
     /// updates in place, and relaunches. Returns false if the download/launch failed.</summary>

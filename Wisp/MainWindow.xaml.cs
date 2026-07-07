@@ -29,7 +29,7 @@ public partial class MainWindow : Window
     private readonly SleepManager _sleep;
     private readonly FindController _find;
     private readonly Bookmarks _bookmarks = Bookmarks.Load();
-    private readonly History _history = History.Load();
+    private readonly History _history; // empty in a private window so the omnibox can't surface real history
     private readonly ObservableCollection<DownloadItem> _downloads = new();
     private readonly bool _isPrivate;
     private readonly string? _privateUdf;
@@ -49,6 +49,7 @@ public partial class MainWindow : Window
         _isPrivate = isPrivate;
         _privateUdf = privateUdf;
         _startupUrl = startupUrl;
+        _history = isPrivate ? new History() : History.Load(); // never read on-disk history in private mode
         AdBlockEngine.Enabled = settings.AdBlockEnabled;
         AdBlockEngine.SetAllowedHosts(settings.AdBlockAllowedHosts);
         _tabs = new TabManager(env, settings, ContentHost);
@@ -797,7 +798,10 @@ public partial class MainWindow : Window
 
     private async void FetchRemoteSuggestions(string q)
     {
+        if (_isPrivate) return; // don't stream private-window keystrokes to the suggest endpoint
+        var prev = _omniCts;
         _omniCts?.Cancel();
+        prev?.Dispose();
         var cts = _omniCts = new CancellationTokenSource();
         var list = await SearchSuggest.FetchAsync(q, cts.Token);
         if (cts.IsCancellationRequested || list.Count == 0) return;
@@ -942,6 +946,9 @@ public partial class MainWindow : Window
     {
         // Only complete when the caret is at the end and nothing is selected.
         if (AddressBox.SelectionLength > 0 || AddressBox.CaretIndex != rawTyped.Length) return;
+        // Bail if the raw text has surrounding whitespace (rawTyped != trimmed q); otherwise
+        // "roblox " would complete to "roblox .com" and get treated as a search.
+        if (rawTyped != q) return;
 
         // When typing a bare site name ("roblox"), complete to just the domain ("roblox.com") so
         // you land on the homepage — not a deep path from history ("roblox.com/games/…"). Only once
@@ -1544,7 +1551,7 @@ public partial class MainWindow : Window
         else if (rest.StartsWith("set:", StringComparison.Ordinal))
             ApplySettingsJson(rest.Substring(4));
         else if (rest == "clear")
-            _ = ClearBrowsingDataAsync();
+            ClearBrowsingData(); // show the selective dialog, not the wipe-everything path
         else if (rest == "import")
             _ = StartImportAsync();
         else if (rest == "exportbm")
@@ -1826,15 +1833,17 @@ public partial class MainWindow : Window
     /// environment, so cookies/logins carry over). Feels like a native app for a single site.</summary>
     private async Task OpenAppWindowAsync(string url, string title, ImageSource? icon)
     {
+        Window? win = null;
         try
         {
             var wv = new WebView2();
-            var win = new Window
+            win = new Window
             {
                 Title = title, Width = 1024, Height = 720, Content = wv,
                 WindowStartupLocation = WindowStartupLocation.CenterScreen,
                 Background = Brushes.Black, Icon = icon, ShowInTaskbar = true,
             };
+            win.Closed += (_, _) => { try { wv.Dispose(); } catch { } };
             win.Show(); // show first so the WebView2 has a window to initialize into
             await wv.EnsureCoreWebView2Async(_env.Core);
             var acw = wv.CoreWebView2;
@@ -1843,24 +1852,29 @@ public partial class MainWindow : Window
             { try { if (!string.IsNullOrWhiteSpace(acw.DocumentTitle)) win.Title = acw.DocumentTitle; } catch { } };
             acw.NewWindowRequested += (_, e) => { _ = HandleAppPopupAsync(e); };
             acw.WindowCloseRequested += (_, _) => { try { win.Close(); } catch { } };
-            win.Closed += (_, _) => { try { wv.Dispose(); } catch { } };
             acw.Navigate(url);
         }
-        catch { ShowToast("Couldn't open the app window"); }
+        catch
+        {
+            try { win?.Close(); } catch { } // don't leave a blank black window if the engine failed
+            ShowToast("Couldn't open the app window");
+        }
     }
 
     /// <summary>Hosts popups (e.g. OAuth sign-in) opened from an app window.</summary>
     private async Task HandleAppPopupAsync(CoreWebView2NewWindowRequestedEventArgs e)
     {
         var deferral = e.GetDeferral();
+        Window? win = null;
         try
         {
             var wv = new WebView2();
-            var win = new Window
+            win = new Window
             {
                 Title = "Wisp", Width = 480, Height = 640, Content = wv,
                 WindowStartupLocation = WindowStartupLocation.CenterScreen, Background = Brushes.Black,
             };
+            win.Closed += (_, _) => { try { wv.Dispose(); } catch { } }; // don't leak the popup's renderer
             win.Show();
             await wv.EnsureCoreWebView2Async(_env.Core);
             wv.CoreWebView2.Settings.IsReputationCheckingRequired = false;
@@ -1868,7 +1882,7 @@ public partial class MainWindow : Window
             e.NewWindow = wv.CoreWebView2;
             deferral.Complete();
         }
-        catch { e.Handled = true; deferral.Complete(); }
+        catch { try { win?.Close(); } catch { } e.Handled = true; deferral.Complete(); }
     }
 
     private void PrintActive()

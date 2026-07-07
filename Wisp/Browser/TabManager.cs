@@ -118,6 +118,13 @@ public class TabManager
         tab.LastActiveUtc = DateTime.UtcNow;
 
         await EnsureViewAsync(tab);
+        // Creating a cold tab's WebView2 can take a while; if the user switched to another tab
+        // during that await, a newer ActivateAsync already won — don't resurrect this stale one.
+        if (Active != tab)
+        {
+            if (tab.View != null) tab.View.Visibility = Visibility.Collapsed;
+            return;
+        }
         if (tab.View != null)
             tab.View.Visibility = Visibility.Visible; // becoming visible auto-resumes a suspended tab
         tab.State = TabState.Active;
@@ -297,6 +304,7 @@ public class TabManager
         if (tab == Active || tab.View?.CoreWebView2 == null || tab.State == TabState.Suspended)
             return false;
         if (tab.View.Visibility == Visibility.Visible) return false; // never sleep an on-screen tab
+        if (tab.IsPlayingAudio && !tab.IsMuted) return false; // never freeze audible playback
         try
         {
             bool ok = await tab.View.CoreWebView2.TrySuspendAsync();
@@ -312,6 +320,7 @@ public class TabManager
     {
         if (tab == Active || tab.View == null) return;
         if (tab.View.Visibility == Visibility.Visible) return; // never discard an on-screen tab
+        if (tab.IsPlayingAudio && !tab.IsMuted) return; // never tear down audible playback
         DestroyView(tab);
         tab.State = TabState.Discarded;
     }
@@ -431,14 +440,18 @@ public class TabManager
         };
 
         // Native ad/tracker blocking — block requests to known ad domains at the network level.
+        // This runs on the UI thread for every request, so keep it cheap: bail before allocating a
+        // Uri when blocking is off, and reuse the page host cached on each navigation (below)
+        // instead of re-parsing cw.Source every call.
+        string pageHostCached = "";
         cw.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.All);
         cw.WebResourceRequested += (_, e) =>
         {
+            if (!AdBlockEngine.Enabled) return;
             try
             {
                 var reqHost = new Uri(e.Request.Uri).Host;
-                string pageHost = ""; try { pageHost = new Uri(cw.Source).Host; } catch { }
-                if (AdBlockEngine.ShouldBlock(reqHost, pageHost))
+                if (AdBlockEngine.ShouldBlock(reqHost, pageHostCached))
                 {
                     tab.BlockedCount++;
                     AdBlockEngine.OnBlocked("");
@@ -476,8 +489,8 @@ public class TabManager
                     _settings.Save();
                     e.State = allow ? CoreWebView2PermissionState.Allow : CoreWebView2PermissionState.Deny;
                 }
-                catch { e.State = CoreWebView2PermissionState.Default; }
-                finally { deferral.Complete(); }
+                catch { try { e.State = CoreWebView2PermissionState.Default; } catch { } }
+                finally { try { deferral.Complete(); } catch { } } // args may be dead if the tab was discarded
             });
         };
 
@@ -504,6 +517,7 @@ public class TabManager
             tab.BlockedCount = 0; // fresh page — reset the per-site block tally
             tab.AddressDraft = null; // navigated — the typed draft is stale
             tab.Url = cw.Source;
+            pageHostCached = HostOf(cw.Source); // refresh the ad-block allowlist host for this page
             PageVisited?.Invoke(cw.Source, tab.Title);
             if (tab == Active) ActiveTabUpdated?.Invoke();
         };
@@ -574,6 +588,7 @@ public class TabManager
                 WindowStartupLocation = WindowStartupLocation.CenterScreen,
                 Background = System.Windows.Media.Brushes.Black,
             };
+            win.Closed += (_, _) => { try { wv.Dispose(); } catch { } }; // don't leak the popup's renderer
             win.Show(); // show first so the WebView2 has a window to initialize into
             await wv.EnsureCoreWebView2Async(_env.Core);
 

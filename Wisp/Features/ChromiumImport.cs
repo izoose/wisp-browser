@@ -145,14 +145,15 @@ public static class ChromiumImport
                 }
             }
 
-            // 2. Bookmarks + 3. History — pure data, safe off-thread; merge + save.
-            await Task.Run(() =>
-            {
-                if (bookmarks && File.Exists(prof.BookmarksPath))
-                    result.Bookmarks = MergeBookmarks(bm, prof.BookmarksPath, prof.Name);
-                if (history && File.Exists(prof.HistoryPath))
-                    result.History = MergeHistory(hist, prof.HistoryPath);
-            });
+            // 2. Bookmarks + 3. History — mutate the shared bm.Roots / hist.Items stores on the UI
+            // thread (the same thread History.Record runs on when a page loads), NOT a threadpool
+            // thread, or the two racing List<T> mutations can corrupt state / crash. Import is a
+            // deliberate, one-time action so doing the parse here (after the cookie await resumed us
+            // on the UI thread) is an acceptable brief pause.
+            if (bookmarks && File.Exists(prof.BookmarksPath))
+                result.Bookmarks = MergeBookmarks(bm, prof.BookmarksPath, prof.Name);
+            if (history && File.Exists(prof.HistoryPath))
+                result.History = MergeHistory(hist, prof.HistoryPath);
         }
         catch (Exception ex) { result.Error = ex.Message; }
         return result;

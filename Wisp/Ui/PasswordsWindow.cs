@@ -160,9 +160,9 @@ public class PasswordsWindow : Window
         // Actions
         var actions = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
         var copyUser = MakeMini("Copy user");
-        copyUser.Click += (_, _) => { TrySetClipboard(login.Username); Flash("Username copied"); };
+        copyUser.Click += (_, _) => Flash(TrySetClipboard(login.Username) ? "Username copied" : "No username to copy");
         var copyPass = MakeMini("Copy pass");
-        copyPass.Click += (_, _) => { TrySetClipboard(login.Password); Flash("Password copied"); };
+        copyPass.Click += (_, _) => Flash(TrySetClipboard(login.Password) ? "Password copied" : "No password to copy");
         var del = MakeMini("Delete");
         del.Foreground = new SolidColorBrush(Color.FromRgb(0xFF, 0x6B, 0x6B));
         del.Click += (_, _) => DeleteLogin(login);
@@ -216,9 +216,10 @@ public class PasswordsWindow : Window
 
     private void Flash(string msg) => _status.Text = msg;
 
-    private static void TrySetClipboard(string s)
+    private static bool TrySetClipboard(string s)
     {
-        try { Clipboard.SetText(s ?? ""); } catch { }
+        if (string.IsNullOrEmpty(s)) return false; // WPF Clipboard.SetText throws on empty
+        try { Clipboard.SetText(s); return true; } catch { return false; }
     }
 
     private static string HostOf(string url)

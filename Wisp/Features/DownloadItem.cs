@@ -12,12 +12,12 @@ public class DownloadItem : INotifyPropertyChanged
 {
     private readonly CoreWebView2DownloadOperation _op;
 
-    public string FileName { get; }
+    // Computed over the live path so a Windows de-dupe rename ("report (1).pdf") is reflected.
+    public string FileName => SafeName(_op.ResultFilePath);
 
     public DownloadItem(CoreWebView2DownloadOperation op)
     {
         _op = op;
-        FileName = SafeName(op.ResultFilePath);
         op.BytesReceivedChanged += (_, _) => Refresh();
         op.StateChanged += (_, _) => Refresh();
         Refresh();
@@ -36,11 +36,18 @@ public class DownloadItem : INotifyPropertyChanged
         Status = _op.State switch
         {
             CoreWebView2DownloadState.Completed => "Done",
-            CoreWebView2DownloadState.Interrupted => "Canceled",
+            CoreWebView2DownloadState.Interrupted => _op.InterruptReason switch
+            {
+                CoreWebView2DownloadInterruptReason.UserCanceled => "Canceled",
+                CoreWebView2DownloadInterruptReason.UserShutdown => "Canceled",
+                CoreWebView2DownloadInterruptReason.UserPaused => "Paused",
+                _ => "Failed",
+            },
             _ => total > 0 ? $"{Human(_op.BytesReceived)} / {Human((long)total)}" : Human(_op.BytesReceived),
         };
         OnChanged(nameof(Progress));
         OnChanged(nameof(Status));
+        OnChanged(nameof(FileName));
         OnChanged(nameof(IsComplete));
         OnChanged(nameof(InProgress));
     }
