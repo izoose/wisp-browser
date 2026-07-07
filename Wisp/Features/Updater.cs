@@ -3,7 +3,9 @@ using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 namespace Wisp;
@@ -23,7 +25,7 @@ public static class Updater
     public static Version Current =>
         Assembly.GetEntryAssembly()?.GetName().Version is { } v ? new Version(v.Major, v.Minor, v.Build < 0 ? 0 : v.Build) : new Version(1, 0, 0);
 
-    public record UpdateInfo(Version Version, string Tag, string? SetupUrl, string? ZipUrl);
+    public record UpdateInfo(Version Version, string Tag, string? SetupUrl, string? ZipUrl, string? ZipSha256);
 
     /// <summary>Returns info about a newer release, or null if up to date / offline / no asset.</summary>
     public static async Task<UpdateInfo?> CheckAsync()
@@ -46,7 +48,16 @@ public static class Updater
                     if (string.Equals(name, "WispSetup.exe", StringComparison.OrdinalIgnoreCase)) setup = url;
                     else if (name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) && name.Contains("portable", StringComparison.OrdinalIgnoreCase)) zip = url;
                 }
-            return (setup == null && zip == null) ? null : new UpdateInfo(v, tag, setup, zip);
+
+            // Optional integrity pin: a "zip-sha256: <hex>" line in the release notes lets us verify
+            // the downloaded portable zip before applying it (guards against a corrupt/tampered asset).
+            string? sha = null;
+            if (root.TryGetProperty("body", out var body) && body.GetString() is { } notes)
+            {
+                var m = Regex.Match(notes, @"zip-sha256:\s*([a-fA-F0-9]{64})");
+                if (m.Success) sha = m.Groups[1].Value.ToLowerInvariant();
+            }
+            return (setup == null && zip == null) ? null : new UpdateInfo(v, tag, setup, zip, sha);
         }
         catch { return null; }
     }
@@ -54,7 +65,7 @@ public static class Updater
     /// <summary>Updates Wisp in place — downloads the portable build, then a helper waits for this
     /// process to exit, copies the new files over wherever Wisp is installed, and relaunches it.
     /// Works no matter where Wisp runs from (no fixed install location, no path mismatch).</summary>
-    public static async Task<bool> ApplyInPlaceAsync(string zipUrl)
+    public static async Task<bool> ApplyInPlaceAsync(string zipUrl, string? expectedSha256 = null)
     {
         try
         {
@@ -64,6 +75,14 @@ public static class Updater
             var tmpDir = Path.Combine(Path.GetTempPath(), "wisp_update_extract");
 
             var bytes = await Http.GetByteArrayAsync(zipUrl);
+
+            // Verify the download against the pinned hash (when the release published one).
+            if (expectedSha256 != null)
+            {
+                var actual = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+                if (actual != expectedSha256) return false; // tampered/corrupt — refuse to apply
+            }
+
             await File.WriteAllBytesAsync(tmpZip, bytes);
             if (Directory.Exists(tmpDir)) Directory.Delete(tmpDir, true);
             System.IO.Compression.ZipFile.ExtractToDirectory(tmpZip, tmpDir);

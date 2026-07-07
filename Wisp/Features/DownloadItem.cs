@@ -27,7 +27,15 @@ public class DownloadItem : INotifyPropertyChanged
     public string Status { get; private set; } = "";
     public bool IsComplete => _op.State == CoreWebView2DownloadState.Completed;
     public bool InProgress => _op.State == CoreWebView2DownloadState.InProgress;
+    public bool Removable => !InProgress; // finished/failed/canceled items can be dismissed from the list
     public string ResultFilePath => _op.ResultFilePath;
+    public string Uri => _op.Uri;
+
+    /// <summary>Interrupted for a recoverable reason (network/server), not user-canceled/paused.</summary>
+    public bool IsFailed => _op.State == CoreWebView2DownloadState.Interrupted
+        && _op.InterruptReason is not (CoreWebView2DownloadInterruptReason.UserCanceled
+            or CoreWebView2DownloadInterruptReason.UserShutdown
+            or CoreWebView2DownloadInterruptReason.UserPaused);
 
     private void Refresh()
     {
@@ -50,6 +58,8 @@ public class DownloadItem : INotifyPropertyChanged
         OnChanged(nameof(FileName));
         OnChanged(nameof(IsComplete));
         OnChanged(nameof(InProgress));
+        OnChanged(nameof(IsFailed));
+        OnChanged(nameof(Removable));
     }
 
     public void Open() { try { Process.Start(new ProcessStartInfo(ResultFilePath) { UseShellExecute = true }); } catch { } }

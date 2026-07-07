@@ -59,6 +59,16 @@
                                             <MenuItem Header="Duplicate tab" Click="Ctx_Duplicate"/>
                                             <MenuItem Header="Pin / Unpin tab" Click="Ctx_Pin"/>
                                             <MenuItem Header="Mute / Unmute tab" Click="Ctx_Mute"/>
+                                            <MenuItem Header="Keep tab awake" Click="Ctx_KeepAwake"
+                                                      IsCheckable="True" IsChecked="{Binding NeverSleep, Mode=OneWay}"/>
+                                            <MenuItem Header="Add tab to group">
+                                                <MenuItem Header="Blue"   Tag="#4C8DFF" Click="Ctx_Group"/>
+                                                <MenuItem Header="Red"    Tag="#F2555A" Click="Ctx_Group"/>
+                                                <MenuItem Header="Green"  Tag="#3FB950" Click="Ctx_Group"/>
+                                                <MenuItem Header="Yellow" Tag="#E3B341" Click="Ctx_Group"/>
+                                                <MenuItem Header="Purple" Tag="#A371F7" Click="Ctx_Group"/>
+                                                <MenuItem Header="Remove from group" Tag="" Click="Ctx_Group"/>
+                                            </MenuItem>
                                             <Border Height="1" Background="{StaticResource EdgeBorderBrush}" Margin="8,5"/>
                                             <MenuItem Header="Close tab" Click="Ctx_Close"/>
                                             <MenuItem Header="Close other tabs" Click="Ctx_CloseOthers"/>
@@ -73,6 +83,10 @@
                                             <ColumnDefinition Width="Auto"/>
                                             <ColumnDefinition Width="Auto"/>
                                         </Grid.ColumnDefinitions>
+                                        <!-- Tab-group color strip along the top -->
+                                        <Border Grid.ColumnSpan="3" Height="3" VerticalAlignment="Top" CornerRadius="8,8,0,0"
+                                                Background="{Binding GroupBrush}"
+                                                Visibility="{Binding HasGroup, Converter={StaticResource BoolToVis}}"/>
                                         <Button Grid.Column="0" ToolTip="{Binding Url}" Click="Tab_Click"
                                                 Style="{StaticResource TabButtonStyle}">
                                             <StackPanel Orientation="Horizontal">
@@ -242,8 +256,12 @@
             <Border Background="{StaticResource ChromeBrush}" BorderBrush="{StaticResource EdgeBorderBrush}"
                     BorderThickness="1" CornerRadius="8" Padding="6" Width="320" MaxHeight="420">
                 <DockPanel>
-                    <TextBlock DockPanel.Dock="Top" Text="Downloads" FontWeight="Bold" FontSize="13"
-                               Foreground="{StaticResource TextBrush}" Margin="8,4,8,8"/>
+                    <DockPanel DockPanel.Dock="Top" Margin="8,4,4,8">
+                        <TextBlock Text="Downloads" FontWeight="Bold" FontSize="13"
+                                   Foreground="{StaticResource TextBrush}" VerticalAlignment="Center"/>
+                        <Button Content="Clear all" Click="DlClearAll_Click" Style="{StaticResource MenuButtonStyle}"
+                                Height="22" Padding="8,0" HorizontalAlignment="Right"/>
+                    </DockPanel>
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <ItemsControl x:Name="DownloadsList">
                             <ItemsControl.ItemTemplate>
@@ -265,6 +283,11 @@
                                                             Height="22" Padding="6,0" Visibility="{Binding IsComplete, Converter={StaticResource BoolToVis}}"/>
                                                     <Button Content="Cancel" Tag="{Binding}" Click="Dl_Cancel" Style="{StaticResource MenuButtonStyle}"
                                                             Height="22" Padding="6,0" Visibility="{Binding InProgress, Converter={StaticResource BoolToVis}}"/>
+                                                    <Button Content="Retry" Tag="{Binding}" Click="Dl_Retry" Style="{StaticResource MenuButtonStyle}"
+                                                            Height="22" Padding="6,0" Visibility="{Binding IsFailed, Converter={StaticResource BoolToVis}}"/>
+                                                    <Button Content="&#xE711;" Tag="{Binding}" Click="Dl_Remove" Style="{StaticResource MenuButtonStyle}"
+                                                            Height="22" Padding="6,0" ToolTip="Remove from list"
+                                                            Visibility="{Binding Removable, Converter={StaticResource BoolToVis}}"/>
                                                 </StackPanel>
                                             </DockPanel>
                                         </StackPanel>

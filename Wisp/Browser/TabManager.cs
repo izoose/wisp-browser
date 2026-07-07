@@ -71,7 +71,7 @@ public class TabManager
     }
 
     /// <summary>Adds a tab from restored session state without creating its WebView2 yet.</summary>
-    public BrowserTab AddLazyTab(string url, string title, bool isPinned = false)
+    public BrowserTab AddLazyTab(string url, string title, bool isPinned = false, bool neverSleep = false, string? groupColor = null)
     {
         var tab = new BrowserTab
         {
@@ -79,6 +79,8 @@ public class TabManager
             Title = string.IsNullOrEmpty(title) ? "New Tab" : title,
             State = TabState.Discarded,
             IsPinned = isPinned,
+            NeverSleep = neverSleep,
+            GroupColor = groupColor,
         };
         Tabs.Add(tab);
         return tab;
@@ -89,7 +91,7 @@ public class TabManager
     {
         var data = new SessionData { ActiveIndex = Active != null ? Tabs.IndexOf(Active) : 0 };
         foreach (var t in Tabs)
-            data.Tabs.Add(new SessionTab { Url = t.Url, Title = t.Title, IsPinned = t.IsPinned });
+            data.Tabs.Add(new SessionTab { Url = t.Url, Title = t.Title, IsPinned = t.IsPinned, NeverSleep = t.NeverSleep, GroupColor = t.GroupColor });
         return data;
     }
 
@@ -158,6 +160,26 @@ public class TabManager
         _ = ActivateAsync(Tabs[i]);
     }
 
+    public void PrevTab()
+    {
+        if (Tabs.Count < 2 || Active == null) return;
+        int i = (Tabs.IndexOf(Active) - 1 + Tabs.Count) % Tabs.Count;
+        _ = ActivateAsync(Tabs[i]);
+    }
+
+    /// <summary>Activates the tab at a 0-based index (Ctrl+1..8), clamped to the last tab.</summary>
+    public void ActivateIndex(int index)
+    {
+        if (Tabs.Count == 0) return;
+        _ = ActivateAsync(Tabs[Math.Min(index, Tabs.Count - 1)]);
+    }
+
+    public void ActivateLast()
+    {
+        if (Tabs.Count == 0) return;
+        _ = ActivateAsync(Tabs[Tabs.Count - 1]);
+    }
+
     // ---- navigation on the active tab ------------------------------------------------
 
     public async Task NavigateActiveAsync(string text)
@@ -165,7 +187,9 @@ public class TabManager
         if (Active == null)
             await NewTabAsync(NewTabUrl, true);
         await EnsureViewAsync(Active!);
-        Active!.View!.CoreWebView2.Navigate(AddressBar.Resolve(text, _settings));
+        var url = AddressBar.Resolve(text, _settings, out bool domainGuess);
+        Active!.SearchFallback = domainGuess ? text : null; // fall back to search if the host won't resolve
+        Active!.View!.CoreWebView2.Navigate(url);
     }
 
     public void GoBack()
@@ -304,6 +328,7 @@ public class TabManager
         if (tab == Active || tab.View?.CoreWebView2 == null || tab.State == TabState.Suspended)
             return false;
         if (tab.View.Visibility == Visibility.Visible) return false; // never sleep an on-screen tab
+        if (tab.NeverSleep) return false; // user pinned this tab awake
         if (tab.IsPlayingAudio && !tab.IsMuted) return false; // never freeze audible playback
         try
         {
@@ -320,6 +345,7 @@ public class TabManager
     {
         if (tab == Active || tab.View == null) return;
         if (tab.View.Visibility == Visibility.Visible) return; // never discard an on-screen tab
+        if (tab.NeverSleep) return; // user pinned this tab awake
         if (tab.IsPlayingAudio && !tab.IsMuted) return; // never tear down audible playback
         DestroyView(tab);
         tab.State = TabState.Discarded;
@@ -525,6 +551,18 @@ public class TabManager
         {
             if (tab == Active) ActiveTabUpdated?.Invoke();
         };
+        cw.NavigationCompleted += (_, e) =>
+        {
+            // If a guessed domain ("vs.code") didn't resolve, search for what the user typed instead
+            // of leaving them on an error page — Chrome/Edge do the same.
+            if (!e.IsSuccess && tab.SearchFallback is { } q
+                && e.WebErrorStatus == CoreWebView2WebErrorStatus.HostNameNotResolved)
+            {
+                tab.SearchFallback = null;
+                try { cw.Navigate(_settings.BuildSearchUrl(q)); } catch { }
+            }
+            else if (e.IsSuccess) tab.SearchFallback = null;
+        };
         cw.NewWindowRequested += (_, e) =>
         {
             var f = e.WindowFeatures;
@@ -660,14 +698,18 @@ public class TabManager
     else if (e.ctrlKey && e.shiftKey && (e.key || '').toLowerCase() === 'i') cmd = 'devtools';
     else if (e.ctrlKey && !e.altKey && !e.metaKey) {
       var k = (e.key || '').toLowerCase();
-      if (k === 't') cmd = 'newtab';
+      if (e.code === 'Tab') cmd = e.shiftKey ? 'prevtab' : 'nexttab';
+      else if (/^(Digit|Numpad)[1-9]$/.test(e.code)) {
+        var d = parseInt(e.code.replace(/\D/g, ''), 10);
+        cmd = d === 9 ? 'tabidx:last' : 'tabidx:' + (d - 1);
+      }
+      else if (k === 't') cmd = 'newtab';
       else if (k === 'w') cmd = 'closetab';
       else if (k === 'l') cmd = 'focusaddress';
       else if (k === 'r') cmd = 'reload';
       else if (k === 'f') cmd = 'find';
       else if (k === 'd') cmd = 'bookmark';
       else if (k === 'h') cmd = 'history';
-      else if (e.code === 'Tab') cmd = 'nexttab';
     } else if (e.altKey && !e.ctrlKey) {
       if (e.code === 'ArrowLeft') cmd = 'back';
       else if (e.code === 'ArrowRight') cmd = 'forward';

@@ -143,12 +143,16 @@ public class PasswordsWindow : Window
             VerticalAlignment = VerticalAlignment.Center, MinWidth = 120,
         };
         bool revealed = false;
+        var mask = new string('•', Math.Min(12, Math.Max(6, login.Password.Length)));
         var reveal = MakeMini("Show");
-        reveal.Click += (_, _) =>
+        reveal.Click += async (_, _) =>
         {
-            revealed = !revealed;
-            pwText.Text = revealed ? login.Password : new string('•', Math.Min(12, Math.Max(6, login.Password.Length)));
-            reveal.Content = revealed ? "Hide" : "Show";
+            if (!revealed)
+            {
+                if (!await OsAuth.VerifyAsync($"Reveal the password for {HostOf(login.Origin)}")) return;
+                revealed = true; pwText.Text = login.Password; reveal.Content = "Hide";
+            }
+            else { revealed = false; pwText.Text = mask; reveal.Content = "Show"; }
         };
         pwRow.Children.Add(pwText);
         pwRow.Children.Add(reveal);
@@ -162,7 +166,11 @@ public class PasswordsWindow : Window
         var copyUser = MakeMini("Copy user");
         copyUser.Click += (_, _) => Flash(TrySetClipboard(login.Username) ? "Username copied" : "No username to copy");
         var copyPass = MakeMini("Copy pass");
-        copyPass.Click += (_, _) => Flash(TrySetClipboard(login.Password) ? "Password copied" : "No password to copy");
+        copyPass.Click += async (_, _) =>
+        {
+            if (!await OsAuth.VerifyAsync($"Copy the password for {HostOf(login.Origin)}")) return;
+            Flash(TrySetClipboard(login.Password) ? "Password copied" : "No password to copy");
+        };
         var del = MakeMini("Delete");
         del.Foreground = new SolidColorBrush(Color.FromRgb(0xFF, 0x6B, 0x6B));
         del.Click += (_, _) => DeleteLogin(login);

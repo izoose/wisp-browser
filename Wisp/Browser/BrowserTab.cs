@@ -88,6 +88,29 @@ public class BrowserTab : INotifyPropertyChanged
     public TabState State { get; set; } = TabState.Discarded;
     public DateTime LastActiveUtc { get; set; } = DateTime.UtcNow;
 
+    /// <summary>When true, this tab is exempt from sleep/suspend/discard (user chose "Keep awake").
+    /// Persisted with the session.</summary>
+    private bool _neverSleep;
+    public bool NeverSleep
+    {
+        get => _neverSleep;
+        set { if (_neverSleep != value) { _neverSleep = value; OnChanged(); } }
+    }
+
+    /// <summary>Tab-group color as a hex string (null = ungrouped). Tabs sharing a color read as a
+    /// group; shown as a colored strip on the tab. Persisted with the session.</summary>
+    private string? _groupColor;
+    public string? GroupColor
+    {
+        get => _groupColor;
+        set { if (_groupColor != value) { _groupColor = value; OnChanged(); OnChanged(nameof(GroupBrush)); OnChanged(nameof(HasGroup)); } }
+    }
+    public bool HasGroup => _groupColor != null;
+    public Brush? GroupBrush
+    {
+        get { try { return _groupColor is { } c ? (Brush)new BrushConverter().ConvertFromString(c)! : null; } catch { return null; } }
+    }
+
     /// <summary>Ad/tracker requests blocked on the current page (reset when navigating).</summary>
     public int BlockedCount { get; set; }
 
@@ -98,6 +121,10 @@ public class BrowserTab : INotifyPropertyChanged
     /// <summary>Unsubmitted text the user typed in the address bar, kept per-tab so switching
     /// away and back doesn't erase it. Cleared on navigation.</summary>
     public string? AddressDraft { get; set; }
+
+    /// <summary>If we guessed the typed text was a domain, the original text — so a failed DNS
+    /// lookup can fall back to a search instead of an error page. Cleared once the page loads.</summary>
+    public string? SearchFallback { get; set; }
 
     /// <summary>The live control, or null when the tab is discarded.</summary>
     public WebView2? View { get; set; }

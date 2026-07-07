@@ -39,6 +39,8 @@ public class BrowserProfile
 public class ImportResult
 {
     public int Cookies, Bookmarks, History, Passwords;
+    /// <summary>Cookies skipped because they use newer app-bound (v20) encryption we can't decrypt.</summary>
+    public int V20Skipped;
     public string? Error;
     public bool Any => Cookies + Bookmarks + History + Passwords > 0;
 }
@@ -127,7 +129,8 @@ public static class ChromiumImport
             // 1. Cookies — decrypt off-thread, then add on the UI thread.
             if (cookies && prof.CookiesDbPath != null)
             {
-                var plain = await Task.Run(() => ReadCookies(prof));
+                var (plain, v20) = await Task.Run(() => ReadCookies(prof));
+                result.V20Skipped = v20;
                 foreach (var c in plain)
                 {
                     try
@@ -164,12 +167,13 @@ public static class ChromiumImport
     private record PlainCookie(string Name, string Value, string Domain, string Path,
         bool Secure, bool HttpOnly, CoreWebView2CookieSameSiteKind SameSite, DateTime? Expires);
 
-    private static List<PlainCookie> ReadCookies(BrowserProfile prof)
+    private static (List<PlainCookie> cookies, int v20) ReadCookies(BrowserProfile prof)
     {
         var outp = new List<PlainCookie>();
+        int v20 = 0;
         byte[]? key;
         try { key = GetMasterKey(prof.LocalStatePath); }
-        catch { return outp; }
+        catch { return (outp, 0); }
 
         var tmp = CopyLocked(prof.CookiesDbPath!);
         try
@@ -194,14 +198,19 @@ public static class ChromiumImport
 
                 if (string.IsNullOrEmpty(host)) continue;
                 var value = DecryptValue(enc, key!, host);
-                if (value == null) continue; // decryption failed
+                if (value == null)
+                {
+                    // v20 = app-bound encryption (Chrome/Edge 127+) we can't decrypt.
+                    if (enc.Length >= 3 && enc[0] == (byte)'v' && enc[1] == (byte)'2' && enc[2] == (byte)'0') v20++;
+                    continue;
+                }
                 outp.Add(new PlainCookie(name, value, host, path, secure, httpOnly,
                     MapSameSite(samesite), ExpiryOf(expires, persistent)));
             }
         }
         catch { }
         finally { SafeDelete(tmp); }
-        return outp;
+        return (outp, v20);
     }
 
     /// <summary>Reads and DPAPI-decrypts the AES master key from the browser's Local State.</summary>

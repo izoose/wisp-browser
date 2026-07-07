@@ -47,6 +47,7 @@ public class SleepManager
         foreach (var tab in _tabs.Tabs.ToArray())
         {
             if (tab == _tabs.Active || tab.View == null) continue;
+            if (tab.NeverSleep) continue; // user pinned this tab awake
             // Never freeze/discard a tab that's audibly playing (music/video) — like Chrome/Edge.
             if (tab.IsPlayingAudio && !tab.IsMuted) continue;
 

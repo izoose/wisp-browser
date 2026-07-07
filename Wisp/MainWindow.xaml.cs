@@ -355,6 +355,20 @@ public partial class MainWindow : Window
     private async void Ctx_Duplicate(object sender, RoutedEventArgs e) { if (TabOf(sender) is { } t) await _tabs.DuplicateAsync(t); }
     private void Ctx_Pin(object sender, RoutedEventArgs e) { if (TabOf(sender) is { } t) { _tabs.TogglePin(t); RelayoutTabs(); } }
     private void Ctx_Mute(object sender, RoutedEventArgs e) { if (TabOf(sender) is { } t) _tabs.ToggleMute(t); }
+    private void Ctx_KeepAwake(object sender, RoutedEventArgs e)
+    {
+        if (TabOf(sender) is not { } t) return;
+        t.NeverSleep = !t.NeverSleep;
+        ShowToast(t.NeverSleep ? "This tab will stay awake" : "This tab can sleep again");
+        ScheduleSessionSave();
+    }
+    private void Ctx_Group(object sender, RoutedEventArgs e)
+    {
+        if (TabOf(sender) is not { } t) return;
+        var hex = (sender as FrameworkElement)?.Tag as string;
+        t.GroupColor = string.IsNullOrEmpty(hex) ? null : hex;
+        ScheduleSessionSave();
+    }
     private void Ctx_Close(object sender, RoutedEventArgs e) { if (TabOf(sender) is { } t) _tabs.CloseTab(t); }
     private void Ctx_CloseOthers(object sender, RoutedEventArgs e) { if (TabOf(sender) is { } t) _tabs.CloseOthers(t); }
     private void Ctx_CloseRight(object sender, RoutedEventArgs e) { if (TabOf(sender) is { } t) _tabs.CloseToRight(t); }
@@ -430,6 +444,31 @@ public partial class MainWindow : Window
     private void Dl_Open(object sender, RoutedEventArgs e) { if ((sender as FrameworkElement)?.Tag is DownloadItem d) d.Open(); }
     private void Dl_Folder(object sender, RoutedEventArgs e) { if ((sender as FrameworkElement)?.Tag is DownloadItem d) d.ShowInFolder(); }
     private void Dl_Cancel(object sender, RoutedEventArgs e) { if ((sender as FrameworkElement)?.Tag is DownloadItem d) d.Cancel(); }
+
+    private void Dl_Remove(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is DownloadItem d) { _downloads.Remove(d); UpdateDownloadsButton(); }
+    }
+
+    private void Dl_Retry(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is not DownloadItem d) return;
+        _downloads.Remove(d);
+        UpdateDownloadsButton();
+        if (!string.IsNullOrEmpty(d.Uri)) _ = _tabs.NavigateActiveAsync(d.Uri); // re-fetch the file
+    }
+
+    private void DlClearAll_Click(object sender, RoutedEventArgs e)
+    {
+        // Keep in-progress downloads; clear the finished/failed/canceled ones.
+        foreach (var d in _downloads.Where(d => !d.InProgress).ToList()) _downloads.Remove(d);
+        UpdateDownloadsButton();
+    }
+
+    private void UpdateDownloadsButton()
+    {
+        if (_downloads.Count == 0) { DownloadsBtn.Visibility = Visibility.Collapsed; DownloadsPopup.IsOpen = false; }
+    }
 
     // ---- zoom pill -------------------------------------------------------------------
 
@@ -1447,7 +1486,7 @@ public partial class MainWindow : Window
 
         // Prefer the in-place update (updates wherever Wisp runs from, no install-location mismatch).
         bool ok = _pendingUpdate.ZipUrl != null
-            ? await Updater.ApplyInPlaceAsync(_pendingUpdate.ZipUrl)
+            ? await Updater.ApplyInPlaceAsync(_pendingUpdate.ZipUrl, _pendingUpdate.ZipSha256)
             : _pendingUpdate.SetupUrl != null && await Updater.DownloadAndRunAsync(_pendingUpdate.SetupUrl);
 
         if (!ok) { ShowToast("Couldn't download the update — try again later"); return; }
@@ -1499,7 +1538,10 @@ public partial class MainWindow : Window
             ShowToast("Import finished with an issue: " + res.Error);
         else if (res.Any || pendingPw > 0)
             ShowToast($"Imported {res.Cookies} logins, {res.Bookmarks} bookmarks, {res.History} history"
-                      + (pendingPw > 0 ? $", {pendingPw} passwords" : ""));
+                      + (pendingPw > 0 ? $", {pendingPw} passwords" : "")
+                      + (res.V20Skipped > 0 ? $" — {res.V20Skipped} cookies use newer encryption and were skipped" : ""));
+        else if (res.V20Skipped > 0)
+            ShowToast($"This browser's cookies use newer app-bound encryption ({res.V20Skipped} skipped) — sign in manually or import from Brave/Firefox");
         else
             ShowToast("Nothing new to import");
 
@@ -2042,7 +2084,7 @@ public partial class MainWindow : Window
             {
                 var st = session.Tabs[i];
                 if (string.IsNullOrWhiteSpace(st.Url)) continue;
-                var tab = _tabs.AddLazyTab(st.Url, st.Title, st.IsPinned);
+                var tab = _tabs.AddLazyTab(st.Url, st.Title, st.IsPinned, st.NeverSleep, st.GroupColor);
                 if (i == session.ActiveIndex) toActivate = tab;
             }
             if (_tabs.Tabs.Count > 0)
@@ -2337,6 +2379,17 @@ public partial class MainWindow : Window
         Add(Key.F, ModifierKeys.Control, ShowFind);
         Add(Key.D, ModifierKeys.Control, ToggleBookmark);
         Add(Key.Tab, ModifierKeys.Control, () => _tabs.NextTab());
+        Add(Key.Tab, ModifierKeys.Control | ModifierKeys.Shift, () => _tabs.PrevTab());
+        // Ctrl+1..8 jump to that tab; Ctrl+9 jumps to the last tab (Chrome/Edge behavior).
+        Add(Key.D1, ModifierKeys.Control, () => _tabs.ActivateIndex(0));
+        Add(Key.D2, ModifierKeys.Control, () => _tabs.ActivateIndex(1));
+        Add(Key.D3, ModifierKeys.Control, () => _tabs.ActivateIndex(2));
+        Add(Key.D4, ModifierKeys.Control, () => _tabs.ActivateIndex(3));
+        Add(Key.D5, ModifierKeys.Control, () => _tabs.ActivateIndex(4));
+        Add(Key.D6, ModifierKeys.Control, () => _tabs.ActivateIndex(5));
+        Add(Key.D7, ModifierKeys.Control, () => _tabs.ActivateIndex(6));
+        Add(Key.D8, ModifierKeys.Control, () => _tabs.ActivateIndex(7));
+        Add(Key.D9, ModifierKeys.Control, () => _tabs.ActivateLast());
         Add(Key.Left, ModifierKeys.Alt, () => _tabs.GoBack());
         Add(Key.Right, ModifierKeys.Alt, () => _tabs.GoForward());
         Add(Key.T, ModifierKeys.Control | ModifierKeys.Shift, async () => await _tabs.ReopenClosedAsync());
@@ -2370,6 +2423,7 @@ public partial class MainWindow : Window
             case "focusaddress": FocusAddress(); break;
             case "reload": _tabs.Reload(); break;
             case "nexttab": _tabs.NextTab(); break;
+            case "prevtab": _tabs.PrevTab(); break;
             case "back": _tabs.GoBack(); break;
             case "forward": _tabs.GoForward(); break;
             case "find": ShowFind(); break;
@@ -2379,7 +2433,13 @@ public partial class MainWindow : Window
             case "history": OpenHistoryPage(); break;
             case "devtools": OpenDevTools(); break;
             default:
-                if (cmd.StartsWith("navigate:", StringComparison.Ordinal))
+                if (cmd.StartsWith("tabidx:", StringComparison.Ordinal))
+                {
+                    var s = cmd.Substring("tabidx:".Length);
+                    if (s == "last") _tabs.ActivateLast();
+                    else if (int.TryParse(s, out var n)) _tabs.ActivateIndex(n);
+                }
+                else if (cmd.StartsWith("navigate:", StringComparison.Ordinal))
                 {
                     var query = Uri.UnescapeDataString(cmd.Substring("navigate:".Length));
                     _ = _tabs.NavigateActiveAsync(query);

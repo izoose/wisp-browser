@@ -9,6 +9,8 @@ public class SessionTab
     public string Url { get; set; } = "";
     public string Title { get; set; } = "";
     public bool IsPinned { get; set; }
+    public bool NeverSleep { get; set; }
+    public string? GroupColor { get; set; }
 }
 
 public class SessionData
