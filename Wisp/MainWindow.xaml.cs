@@ -37,6 +37,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _sessionTimer;
     private readonly DispatcherTimer _audioNameTimer;
     private DispatcherTimer? _toastTimer;
+    private DispatcherTimer? _updateTimer;
 
     private static readonly string[] Engines = { "Google", "DuckDuckGo", "Brave Search", "Bing" };
 
@@ -147,12 +148,20 @@ public partial class MainWindow : Window
 
             await MaybeOfferImportAsync();
 
-            // Quietly check for a newer release a few seconds after launch.
+            // Quietly check for a newer release a few seconds after launch, then keep checking every
+            // 6 hours so a long-running window still learns about updates without a restart.
             if (!_isPrivate && _settings.AutoUpdateCheck
                 && Environment.GetEnvironmentVariable("WISP_NO_FIRSTRUN") != "1")
             {
                 await Task.Delay(4000);
                 await CheckForUpdatesAsync(manual: false);
+
+                _updateTimer = new DispatcherTimer { Interval = TimeSpan.FromHours(6) };
+                _updateTimer.Tick += async (_, _) =>
+                {
+                    if (!UpdatePopup.IsOpen) await CheckForUpdatesAsync(manual: false);
+                };
+                _updateTimer.Start();
             }
         };
 
