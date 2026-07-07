@@ -73,6 +73,10 @@ public class AppSettings
     /// <summary>Check GitHub for a newer Wisp release on startup and offer a one-click update.</summary>
     public bool AutoUpdateCheck { get; set; } = true;
 
+    /// <summary>The version that last ran. When it changes (i.e. after an update) we nudge the
+    /// Windows shell to refresh icons, so an in-place .exe swap doesn't leave a blank taskbar icon.</summary>
+    public string? LastRunVersion { get; set; }
+
     /// <summary>Omnibox keyword shortcuts: type "yt cats" to search YouTube. %s is the query.</summary>
     public System.Collections.Generic.List<SearchKeyword> SearchKeywords { get; set; } = SearchKeyword.Defaults();
 

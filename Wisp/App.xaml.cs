@@ -29,6 +29,11 @@ public partial class App : Application
     private static extern int SetCurrentProcessExplicitAppUserModelID(
         [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPWStr)] string appId);
 
+    [System.Runtime.InteropServices.DllImport("shell32.dll")]
+    private static extern void SHChangeNotify(int wEventId, uint uFlags, IntPtr dwItem1, IntPtr dwItem2);
+    private const int SHCNE_ASSOCCHANGED = 0x08000000;
+    private const uint SHCNF_IDLIST = 0x0000;
+
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -60,6 +65,21 @@ public partial class App : Application
         AppPaths.EnsureDataDir();
         Settings = AppSettings.Load();
         try { DefaultBrowser.Register(); } catch { }
+
+        // An in-place update swaps Wisp.exe under the pinned shortcut, which can leave Windows
+        // showing a stale/blank taskbar icon. On the first launch of a new version, ask the shell
+        // to refresh its icon cache so the taskbar/desktop icons re-read from the new exe.
+        try
+        {
+            var ver = Updater.Current.ToString(3);
+            if (Settings.LastRunVersion != ver)
+            {
+                Settings.LastRunVersion = ver;
+                Settings.Save();
+                SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, IntPtr.Zero, IntPtr.Zero);
+            }
+        }
+        catch { }
 
         // Finish any password import staged before the last restart. Must happen before the
         // WebView2 environment starts, because it locks the Login Data database.
