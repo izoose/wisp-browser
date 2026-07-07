@@ -328,14 +328,25 @@ public class TabManager
 
     /// <summary>Opens a link (middle-click / target=_blank) as a background tab placed right after
     /// the tab it came from, like Chrome — not at the end of the strip.</summary>
-    public async Task<BrowserTab> OpenChildTabAsync(string url, BrowserTab opener)
+    public async Task<BrowserTab> OpenChildTabAsync(string url, BrowserTab opener, bool background = false)
     {
         var tab = new BrowserTab { Url = url, Title = "New Tab", State = TabState.Background, Opener = opener };
         InsertAdjacent(tab, opener);
         await EnsureViewAsync(tab);
         tab.LastActiveUtc = DateTime.UtcNow;
+        // A normal link/_blank click should switch to the new tab (otherwise it looks like the
+        // click did nothing). Ctrl+click / middle-click keep it in the background.
+        if (!background) await ActivateAsync(tab);
         return tab;
     }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern short GetKeyState(int nVirtKey);
+
+    /// <summary>True when Ctrl or the middle mouse button is down — i.e. "open in the background".</summary>
+    private static bool OpenInBackground()
+        => (GetKeyState(0x11) & 0x8000) != 0   // VK_CONTROL
+        || (GetKeyState(0x04) & 0x8000) != 0;  // VK_MBUTTON
 
     /// <summary>Inserts a tab right after its opener (and after any siblings already opened from
     /// the same tab), skipping the pinned block so a normal tab never lands among pinned ones.</summary>
@@ -514,7 +525,8 @@ public class TabManager
             else
             {
                 e.Handled = true; // a plain new window / target=_blank / middle-click — open as a tab
-                _ = OpenChildTabAsync(e.Uri, tab); // background, right next to the opener
+                // Foreground it on a normal click; keep it in the background for Ctrl/middle-click.
+                _ = OpenChildTabAsync(e.Uri, tab, OpenInBackground());
             }
         };
         cw.WebMessageReceived += (_, e) =>
