@@ -20,6 +20,7 @@ public partial class App : Application
 
     public AppSettings Settings { get; private set; } = null!;
     public BrowserEnvironment Browser { get; private set; } = null!;
+    public History History { get; private set; } = null!;
 
     public static new App Current => (App)Application.Current;
 
@@ -46,7 +47,7 @@ public partial class App : Application
 
     public MainWindow OpenNewWindow()
     {
-        var w = new MainWindow(Browser, Settings);
+        var w = new MainWindow(Browser, Settings, restoreSession: false);
         w.Show();
         return w;
     }
@@ -108,6 +109,7 @@ public partial class App : Application
         ShutdownMode = ShutdownMode.OnLastWindowClose;
         AppPaths.EnsureDataDir();
         Settings = AppSettings.Load();
+        History = History.Load();
         try { DefaultBrowser.Register(); } catch { }
 
         // An in-place update swaps Wisp.exe under the pinned shortcut, which can leave Windows

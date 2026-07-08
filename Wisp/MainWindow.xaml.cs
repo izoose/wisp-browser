@@ -35,6 +35,7 @@ public partial class MainWindow : Window
     private readonly string? _privateUdf;
     private readonly string? _startupUrl;
     private readonly bool _blankForAdopt;
+    private readonly bool _restoreSession;
     private readonly DispatcherTimer _sessionTimer;
     private readonly DispatcherTimer _audioNameTimer;
     private DispatcherTimer? _toastTimer;
@@ -42,7 +43,7 @@ public partial class MainWindow : Window
 
     private static readonly string[] Engines = { "Google", "DuckDuckGo", "Brave Search", "Bing" };
 
-    public MainWindow(BrowserEnvironment env, AppSettings settings, bool isPrivate = false, string? privateUdf = null, string? startupUrl = null, bool blankForAdopt = false)
+    public MainWindow(BrowserEnvironment env, AppSettings settings, bool isPrivate = false, string? privateUdf = null, string? startupUrl = null, bool blankForAdopt = false, bool restoreSession = true)
     {
         InitializeComponent();
         _env = env;
@@ -51,7 +52,8 @@ public partial class MainWindow : Window
         _privateUdf = privateUdf;
         _startupUrl = startupUrl;
         _blankForAdopt = blankForAdopt;
-        _history = isPrivate ? new History() : History.Load(); // never read on-disk history in private mode
+        _restoreSession = restoreSession;
+        _history = isPrivate ? new History() : App.Current.History; // never read on-disk history in private mode
         AdBlockEngine.Enabled = settings.AdBlockEnabled;
         AdBlockEngine.SetAllowedHosts(settings.AdBlockAllowedHosts);
         _tabs = new TabManager(env, settings, ContentHost);
@@ -116,11 +118,20 @@ public partial class MainWindow : Window
         Loaded += async (_, _) =>
         {
             if (!_isPrivate) App.Current.RegisterWindow(this);
-            if (!_blankForAdopt)
+            if (_blankForAdopt)
+            {
+                // Tear-off target — a tab will be adopted into this window; open nothing here.
+            }
+            else if (_restoreSession)
             {
                 await RestoreOrOpenHomeAsync();
                 if (!string.IsNullOrWhiteSpace(_startupUrl))
                     await _tabs.NewTabAsync(_startupUrl, true); // opened from a link/file (default browser)
+            }
+            else
+            {
+                // A fresh "New window" (Ctrl+N) opens a single new-tab page, not the restored session.
+                await _tabs.NewTabAsync(TabManager.NewTabUrl, true);
             }
             _tabs.Active?.View?.Focus();
             await RefreshExtensionsAsync();
@@ -1300,7 +1311,11 @@ public partial class MainWindow : Window
 
     partial void OnOpenPrivateWindow() => OpenPrivate();
 
-    private void OpenNewWindow() => App.Current.OpenNewWindow();
+    private void OpenNewWindow()
+    {
+        try { App.Current.OpenNewWindow(); }
+        catch (Exception ex) { ShowToast("Couldn't open a new window: " + ex.Message); }
+    }
 
     private async void OpenPrivate()
     {
