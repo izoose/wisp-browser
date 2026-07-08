@@ -105,8 +105,9 @@ public partial class MainWindow : Window
 
         if (_isPrivate)
         {
-            Title = "Private — Wisp";
+            Title = "Incognito — Wisp";
             Background = new SolidColorBrush(Color.FromRgb(0x22, 0x1B, 0x33)); // subtle purple tint
+            IncognitoBadge.Visibility = Visibility.Visible;
         }
 
         Loaded += async (_, _) =>
