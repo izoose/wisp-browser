@@ -50,6 +50,16 @@ public class TabManager
     /// <summary>Raised when a page calls alert()/confirm()/prompt() so we can show a Wisp-styled dialog.</summary>
     public event Action<CoreWebView2ScriptDialogOpeningEventArgs>? ScriptDialogRequested;
 
+    /// <summary>The window currently hosting this manager's tabs (resolved from the host panel).</summary>
+    public Window? OwnerWindow => Window.GetWindow(_host);
+
+    // Event re-raisers so a tab's handlers can fire events on its CURRENT owner after being moved.
+    public void RaiseActiveTabUpdated() => ActiveTabUpdated?.Invoke();
+    public void RaisePageVisited(string url, string title) => PageVisited?.Invoke(url, title);
+    public void RaiseDownloadStarted(CoreWebView2DownloadOperation op) => DownloadStarted?.Invoke(op);
+    public void RaiseFullScreenChanged(bool on) => FullScreenChanged?.Invoke(on);
+    public void RaiseAccelerator(string cmd) => AcceleratorRequested?.Invoke(cmd);
+
     /// <summary>Recently-closed tabs, for Ctrl+Shift+T. Newest last.</summary>
     private readonly List<SessionTab> _closed = new();
     public bool HasClosedTabs => _closed.Count > 0;
@@ -64,6 +74,7 @@ public class TabManager
     public async Task<BrowserTab> NewTabAsync(string url, bool activate)
     {
         var tab = new BrowserTab { Url = url, Title = "New Tab", State = TabState.Discarded };
+        tab.Owner = this;
         Tabs.Add(tab);
         if (activate)
             await ActivateAsync(tab);
@@ -82,6 +93,7 @@ public class TabManager
             NeverSleep = neverSleep,
             GroupColor = groupColor,
         };
+        tab.Owner = this;
         Tabs.Add(tab);
         return tab;
     }
@@ -366,6 +378,7 @@ public class TabManager
     public async Task<BrowserTab> OpenChildTabAsync(string url, BrowserTab opener, bool background = false)
     {
         var tab = new BrowserTab { Url = url, Title = "New Tab", State = TabState.Background, Opener = opener };
+        tab.Owner = this;
         InsertAdjacent(tab, opener);
         await EnsureViewAsync(tab);
         tab.LastActiveUtc = DateTime.UtcNow;
@@ -375,13 +388,42 @@ public class TabManager
         return tab;
     }
 
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
-    private static extern short GetKeyState(int nVirtKey);
+    /// <summary>Removes a tab from this window WITHOUT disposing its WebView2, so it can be adopted
+    /// by another window with its live page intact. Activates a neighbor if the active tab left.</summary>
+    public BrowserTab DetachTab(BrowserTab tab)
+    {
+        int idx = Tabs.IndexOf(tab);
+        BrowserTab? neighbor = null;
+        if (idx >= 0)
+        {
+            if (idx + 1 < Tabs.Count) neighbor = Tabs[idx + 1];
+            else if (idx - 1 >= 0) neighbor = Tabs[idx - 1];
+        }
 
-    /// <summary>True when Ctrl or the middle mouse button is down — i.e. "open in the background".</summary>
-    private static bool OpenInBackground()
-        => (GetKeyState(0x11) & 0x8000) != 0   // VK_CONTROL
-        || (GetKeyState(0x04) & 0x8000) != 0;  // VK_MBUTTON
+        if (tab.View != null) _host.Children.Remove(tab.View); // detach the control; do NOT dispose
+        Tabs.Remove(tab);
+
+        if (Active == tab)
+        {
+            Active = null;
+            if (neighbor != null) _ = ActivateAsync(neighbor);
+        }
+        return tab;
+    }
+
+    /// <summary>Takes ownership of a detached tab: hosts its existing WebView2 in this window and
+    /// activates it. The page keeps its live state (scroll/media/forms).</summary>
+    public async Task AdoptTab(BrowserTab tab)
+    {
+        tab.Owner = this;
+        if (tab.View != null)
+        {
+            tab.View.Visibility = Visibility.Collapsed;
+            if (!_host.Children.Contains(tab.View)) _host.Children.Add(tab.View);
+        }
+        Tabs.Add(tab);
+        await ActivateAsync(tab);
+    }
 
     /// <summary>Inserts a tab right after its opener (and after any siblings already opened from
     /// the same tab), skipping the pinned block so a normal tab never lands among pinned ones.</summary>
@@ -400,6 +442,7 @@ public class TabManager
 
     private async Task EnsureViewAsync(BrowserTab tab)
     {
+        tab.Owner = this;
         if (tab.View != null) return;
 
         var view = new WebView2 { Visibility = Visibility.Collapsed };
@@ -443,7 +486,7 @@ public class TabManager
         // Web-initiated fullscreen (e.g. a YouTube video's fullscreen button).
         cw.ContainsFullScreenElementChanged += (_, _) =>
         {
-            if (tab == Active) FullScreenChanged?.Invoke(cw.ContainsFullScreenElement);
+            if (tab == tab.Owner?.Active) tab.Owner?.RaiseFullScreenChanged(cw.ContainsFullScreenElement);
         };
 
         // Add "Search <engine> for …" to the right-click menu (WebView2's default menu has no
@@ -458,7 +501,7 @@ public class TabManager
                 var label = sel.Length > 32 ? sel.Substring(0, 32).TrimEnd() + "…" : sel;
                 var search = _env.Core.CreateContextMenuItem(
                     $"Search {_settings.SearchEngine} for “{label}”", null, CoreWebView2ContextMenuItemKind.Command);
-                search.CustomItemSelected += (_, _) => _ = NewTabAsync(_settings.BuildSearchUrl(sel), true);
+                search.CustomItemSelected += (_, _) => _ = (tab.Owner ?? this).NewTabAsync(_settings.BuildSearchUrl(sel), true);
                 e.MenuItems.Insert(0, search);
                 e.MenuItems.Insert(1, _env.Core.CreateContextMenuItem("", null, CoreWebView2ContextMenuItemKind.Separator));
             }
@@ -477,12 +520,23 @@ public class TabManager
             try
             {
                 var reqHost = new Uri(e.Request.Uri).Host;
-                if (AdBlockEngine.ShouldBlock(reqHost, pageHostCached))
+                if (!AdBlockEngine.ShouldBlock(reqHost, pageHostCached)) return;
+
+                // Never 204 the page the user is navigating to — many "trackers" (t.co,
+                // redirectingat.com, affiliate/link shorteners) double as functional redirects,
+                // so blocking the top-level navigation just breaks the click. We still block them
+                // as sub-resources (pixels/scripts/iframes). Sec-Fetch-Dest == "document" marks the
+                // main-frame navigation; iframes send "iframe", so ad iframes stay blocked.
+                if (e.ResourceContext == CoreWebView2WebResourceContext.Document)
                 {
-                    tab.BlockedCount++;
-                    AdBlockEngine.OnBlocked("");
-                    e.Response = _env.Core.CreateWebResourceResponse(null, 204, "No Content", "");
+                    var dest = e.Request.Headers.Contains("Sec-Fetch-Dest")
+                        ? e.Request.Headers.GetHeader("Sec-Fetch-Dest") : null;
+                    if (dest == null || dest == "document") return;
                 }
+
+                tab.BlockedCount++;
+                AdBlockEngine.OnBlocked("");
+                e.Response = _env.Core.CreateWebResourceResponse(null, 204, "No Content", "");
             }
             catch { }
         };
@@ -509,7 +563,7 @@ public class TabManager
                 try
                 {
                     string host; try { host = new Uri(e.Uri).Host; } catch { host = origin; }
-                    var owner = Window.GetWindow(_host);
+                    var owner = tab.Owner?.OwnerWindow ?? Window.GetWindow(_host);
                     bool allow = owner != null && PromptDialog.AllowBlock(owner, host, $"{host} wants to {what}.");
                     _settings.SitePermissions[key] = allow;
                     _settings.Save();
@@ -527,7 +581,7 @@ public class TabManager
         cw.DownloadStarting += (_, e) =>
         {
             e.Handled = true; // suppress the default download bar; we show our own panel
-            DownloadStarted?.Invoke(e.DownloadOperation);
+            (tab.Owner ?? this).RaiseDownloadStarted(e.DownloadOperation);
         };
 
         await AdBlock.EnsureRemovedAsync(cw, _settings); // uninstall the old bundled uBO Lite, once
@@ -535,8 +589,8 @@ public class TabManager
         cw.DocumentTitleChanged += (_, _) =>
         {
             tab.Title = string.IsNullOrWhiteSpace(cw.DocumentTitle) ? HostOf(cw.Source) : cw.DocumentTitle;
-            PageVisited?.Invoke(cw.Source, cw.DocumentTitle);
-            if (tab == Active) ActiveTabUpdated?.Invoke();
+            tab.Owner?.RaisePageVisited(cw.Source, cw.DocumentTitle);
+            if (tab == tab.Owner?.Active) tab.Owner?.RaiseActiveTabUpdated();
         };
         cw.SourceChanged += (_, _) =>
         {
@@ -544,12 +598,12 @@ public class TabManager
             tab.AddressDraft = null; // navigated — the typed draft is stale
             tab.Url = cw.Source;
             pageHostCached = HostOf(cw.Source); // refresh the ad-block allowlist host for this page
-            PageVisited?.Invoke(cw.Source, tab.Title);
-            if (tab == Active) ActiveTabUpdated?.Invoke();
+            tab.Owner?.RaisePageVisited(cw.Source, tab.Title);
+            if (tab == tab.Owner?.Active) tab.Owner?.RaiseActiveTabUpdated();
         };
         cw.HistoryChanged += (_, _) =>
         {
-            if (tab == Active) ActiveTabUpdated?.Invoke();
+            if (tab == tab.Owner?.Active) tab.Owner?.RaiseActiveTabUpdated();
         };
         cw.NavigationCompleted += (_, e) =>
         {
@@ -577,21 +631,28 @@ public class TabManager
             else
             {
                 e.Handled = true; // a plain new window / target=_blank / middle-click — open as a tab
-                // Foreground it on a normal click; keep it in the background for Ctrl/middle-click.
-                _ = OpenChildTabAsync(e.Uri, tab, OpenInBackground());
+                // Background it when the setting is on AND this was a middle/Ctrl click (hint fired within 1s);
+                // a plain left-click on a target=_blank link (no hint) still foregrounds.
+                bool bg = _settings.OpenLinksInBackground
+                          && (DateTime.UtcNow - tab.BgHintUtc) < TimeSpan.FromSeconds(1);
+                tab.BgHintUtc = DateTime.MinValue; // consume the hint
+                _ = (tab.Owner ?? this).OpenChildTabAsync(e.Uri, tab, bg);
             }
         };
         cw.WebMessageReceived += (_, e) =>
         {
             string? msg = null;
             try { msg = e.TryGetWebMessageAsString(); } catch { /* non-string message */ }
+            if (msg == "wisp:bgnext") { tab.BgHintUtc = DateTime.UtcNow; return; }
+            if (msg == "wisp:bgclear") { tab.BgHintUtc = DateTime.MinValue; return; }
             if (msg is { } m && m.StartsWith("wisp:", StringComparison.Ordinal))
-                AcceleratorRequested?.Invoke(m.Substring(5));
+                (tab.Owner ?? this).RaiseAccelerator(m.Substring(5));
         };
 
         // Shortcuts must also work while web content has focus. The WPF wrapper doesn't
         // surface AcceleratorKeyPressed, so we capture the keys in-page and post them back.
         await cw.AddScriptToExecuteOnDocumentCreatedAsync(AcceleratorScript);
+        await cw.AddScriptToExecuteOnDocumentCreatedAsync(BgClickScript);
         // Adds an "Add to Wisp" button on Chrome Web Store detail pages.
         await cw.AddScriptToExecuteOnDocumentCreatedAsync(StoreButtonScript);
         // YouTube ads share the video's own domain, so the network blocker can't touch them —
@@ -715,6 +776,23 @@ public class TabManager
       else if (e.code === 'ArrowRight') cmd = 'forward';
     }
     if (cmd) { e.preventDefault(); e.stopPropagation(); window.chrome.webview.postMessage('wisp:' + cmd); }
+  }, true);
+})();";
+
+    /// <summary>Marks the next new-window request as a background open when the user middle-clicked
+    /// or Ctrl/Cmd-clicked a link. NewWindowRequested itself can't tell us the mouse button, and
+    /// GetKeyState is unreliable (the button is already released by the time it fires), so we detect
+    /// it in the page at mousedown and post a hint back.</summary>
+    private const string BgClickScript = @"
+(function () {
+  window.addEventListener('mousedown', function (e) {
+    if (!e.isTrusted) return;
+    var a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+    if (!a) return;
+    if (e.button === 1 || (e.button === 0 && (e.ctrlKey || e.metaKey)))
+      window.chrome.webview.postMessage('wisp:bgnext');
+    else if (e.button === 0)
+      window.chrome.webview.postMessage('wisp:bgclear');
   }, true);
 })();";
 

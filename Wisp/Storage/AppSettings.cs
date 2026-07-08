@@ -60,6 +60,10 @@ public class AppSettings
     /// new-tab page's search box.</summary>
     public bool FocusAddressOnNewTab { get; set; }
 
+    /// <summary>Middle-click / Ctrl+click on a link opens a background tab (stay on the current
+    /// page). A plain left-click on a target=_blank link still switches to the new tab.</summary>
+    public bool OpenLinksInBackground { get; set; } = true;
+
     /// <summary>Aggressive memory saver: coalesces cross-site renderers (fewer processes, less
     /// RAM) at the cost of weaker site isolation. Applies after restart.</summary>
     public bool MemorySaver { get; set; }

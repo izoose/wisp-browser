@@ -34,6 +34,8 @@ public partial class MainWindow : Window
     private readonly bool _isPrivate;
     private readonly string? _privateUdf;
     private readonly string? _startupUrl;
+    private readonly bool _blankForAdopt;
+    private readonly bool _restoreSession;
     private readonly DispatcherTimer _sessionTimer;
     private readonly DispatcherTimer _audioNameTimer;
     private DispatcherTimer? _toastTimer;
@@ -41,7 +43,7 @@ public partial class MainWindow : Window
 
     private static readonly string[] Engines = { "Google", "DuckDuckGo", "Brave Search", "Bing" };
 
-    public MainWindow(BrowserEnvironment env, AppSettings settings, bool isPrivate = false, string? privateUdf = null, string? startupUrl = null)
+    public MainWindow(BrowserEnvironment env, AppSettings settings, bool isPrivate = false, string? privateUdf = null, string? startupUrl = null, bool blankForAdopt = false, bool restoreSession = true)
     {
         InitializeComponent();
         _env = env;
@@ -49,7 +51,9 @@ public partial class MainWindow : Window
         _isPrivate = isPrivate;
         _privateUdf = privateUdf;
         _startupUrl = startupUrl;
-        _history = isPrivate ? new History() : History.Load(); // never read on-disk history in private mode
+        _blankForAdopt = blankForAdopt;
+        _restoreSession = restoreSession;
+        _history = isPrivate ? new History() : App.Current.History; // never read on-disk history in private mode
         AdBlockEngine.Enabled = settings.AdBlockEnabled;
         AdBlockEngine.SetAllowedHosts(settings.AdBlockAllowedHosts);
         _tabs = new TabManager(env, settings, ContentHost);
@@ -68,14 +72,14 @@ public partial class MainWindow : Window
         DownloadsList.ItemsSource = _downloads;
 
         _sessionTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(4) };
-        _sessionTimer.Tick += (_, _) => { _sessionTimer.Stop(); if (!_isPrivate) SessionStore.Save(_tabs.Snapshot()); };
+        _sessionTimer.Tick += (_, _) => { _sessionTimer.Stop(); if (!_isPrivate) App.Current.SaveSession(); };
 
         // Show up as "Wisp" (not "Microsoft Edge WebView2") in the Windows Volume Mixer.
         _audioNameTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2.5) };
         _audioNameTimer.Tick += (_, _) =>
         {
             if (_tabs.Tabs.Any(t => t.IsPlayingAudio))
-                AudioSessionNaming.Apply(_isPrivate ? "Wisp (Private)" : "Wisp", (Environment.ProcessPath ?? "") + ",0");
+                AudioSessionNaming.Apply(_isPrivate ? "Wisp (Incognito)" : "Wisp", (Environment.ProcessPath ?? "") + ",0");
         };
         _audioNameTimer.Start();
 
@@ -92,20 +96,43 @@ public partial class MainWindow : Window
             if (WindowState == WindowState.Minimized) _ = _tabs.SuspendActiveAsync();
             else _tabs.ResumeActive();
         };
+        Activated += (_, _) =>
+        {
+            if (!_isPrivate) App.Current.SetFront(this);
+            if (_showUpdateWhenActive && _pendingUpdate != null && !UpdatePopup.IsOpen)
+            {
+                _showUpdateWhenActive = false;
+                UpdatePopup.IsOpen = true;
+            }
+        };
         AddressBox.TextChanged += Address_TextChanged;
         ApplyBookmarksBar();
 
         if (_isPrivate)
         {
-            Title = "Private — Wisp";
+            Title = "Incognito — Wisp";
             Background = new SolidColorBrush(Color.FromRgb(0x22, 0x1B, 0x33)); // subtle purple tint
+            IncognitoBadge.Visibility = Visibility.Visible;
         }
 
         Loaded += async (_, _) =>
         {
-            await RestoreOrOpenHomeAsync();
-            if (!string.IsNullOrWhiteSpace(_startupUrl))
-                await _tabs.NewTabAsync(_startupUrl, true); // opened from a link/file (default browser)
+            if (!_isPrivate) App.Current.RegisterWindow(this);
+            if (_blankForAdopt)
+            {
+                // Tear-off target — a tab will be adopted into this window; open nothing here.
+            }
+            else if (_restoreSession)
+            {
+                await RestoreOrOpenHomeAsync();
+                if (!string.IsNullOrWhiteSpace(_startupUrl))
+                    await _tabs.NewTabAsync(_startupUrl, true); // opened from a link/file (default browser)
+            }
+            else
+            {
+                // A fresh "New window" (Ctrl+N) opens a single new-tab page, not the restored session.
+                await _tabs.NewTabAsync(TabManager.NewTabUrl, true);
+            }
             _tabs.Active?.View?.Focus();
             await RefreshExtensionsAsync();
 
@@ -175,7 +202,9 @@ public partial class MainWindow : Window
                 try { if (_privateUdf != null && System.IO.Directory.Exists(_privateUdf)) System.IO.Directory.Delete(_privateUdf, true); } catch { }
                 return;
             }
-            SessionStore.Save(_tabs.Snapshot());
+            App.Current.UnregisterWindow(this);
+            if (App.Current.HasOpenWindows) App.Current.SaveSession(); // union of remaining windows
+            else SessionStore.Save(_tabs.Snapshot());                  // last window: preserve its tabs
             _settings.Save();
             _history.Save();
         };
@@ -187,6 +216,8 @@ public partial class MainWindow : Window
         _sessionTimer.Stop();
         _sessionTimer.Start();
     }
+
+    internal SessionData SnapshotSession() => _tabs.Snapshot();
 
     private void TabScroller_SizeChanged(object sender, SizeChangedEventArgs e) => RelayoutTabs();
 
@@ -394,7 +425,7 @@ public partial class MainWindow : Window
         _dragging = false;
     }
 
-    private void TabStrip_MouseMove(object sender, MouseEventArgs e)
+    private async void TabStrip_MouseMove(object sender, MouseEventArgs e)
     {
         if (_dragTab == null || e.LeftButton != MouseButtonState.Pressed) return;
         var pos = e.GetPosition(TabStrip);
@@ -404,9 +435,50 @@ public partial class MainWindow : Window
             _dragging = true;
             TabStrip.CaptureMouse();
         }
+
+        // Dragged well below the strip → tear the tab off into its own new window (like Chrome/Edge).
+        if (pos.Y > TabStrip.ActualHeight + 40)
+        {
+            var torn = _dragTab;
+            _dragTab = null;
+            _dragging = false;
+            TabStrip.ReleaseMouseCapture();
+            await TearOffAsync(torn);
+            return;
+        }
+
         var target = FindTabAt(pos);
         if (target != null && target != _dragTab)
             _tabs.MoveTab(_dragTab, _tabs.Tabs.IndexOf(target));
+    }
+
+    /// <summary>Moves a tab (live) into a new window positioned at the cursor. Closes this window
+    /// if the tab was its last one.</summary>
+    private async Task TearOffAsync(BrowserTab tab)
+    {
+        // Don't tear off the only tab of the only window — nothing would be left.
+        if (_tabs.Tabs.Count <= 1 && !App.Current.HasOpenWindows) return;
+
+        var w = App.Current.OpenBlankWindow();
+
+        // Position the new window at the cursor (convert physical pixels → DIPs for Left/Top).
+        try
+        {
+            GetCursorPos(out var pt);
+            var src = PresentationSource.FromVisual(this);
+            if (src?.CompositionTarget != null)
+            {
+                var dip = src.CompositionTarget.TransformFromDevice.Transform(new Point(pt.X, pt.Y));
+                w.Left = dip.X - 80;
+                w.Top = dip.Y - 12;
+            }
+        }
+        catch { }
+
+        var detached = _tabs.DetachTab(tab);
+        await w.AdoptTabAsync(detached);
+
+        if (_tabs.Tabs.Count == 0) Close();
     }
 
     private void TabStrip_MouseUp(object sender, MouseButtonEventArgs e)
@@ -1280,6 +1352,20 @@ public partial class MainWindow : Window
 
     partial void OnOpenPrivateWindow() => OpenPrivate();
 
+    private void OpenNewWindow()
+    {
+        try { App.Current.OpenNewWindow(); }
+        catch (Exception ex) { ShowToast("Couldn't open a new window: " + ex.Message); }
+    }
+
+    internal Task AdoptTabAsync(BrowserTab tab) => _tabs.AdoptTab(tab);
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct POINT { public int X; public int Y; }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out POINT p);
+
     private async void OpenPrivate()
     {
         try
@@ -1288,7 +1374,7 @@ public partial class MainWindow : Window
             var w = new MainWindow(env, _settings, isPrivate: true, privateUdf: udf);
             w.Show();
         }
-        catch (Exception ex) { ShowToast("Couldn't open private window: " + ex.Message); }
+        catch (Exception ex) { ShowToast("Couldn't open incognito window: " + ex.Message); }
     }
 
     private async void OpenReader()
@@ -1461,6 +1547,7 @@ public partial class MainWindow : Window
     // ---- auto-update -----------------------------------------------------------------
 
     private Updater.UpdateInfo? _pendingUpdate;
+    private bool _showUpdateWhenActive;
 
     /// <summary>Checks GitHub for a newer release. On startup this is silent unless one is found;
     /// invoked from the menu it reports "up to date" too.</summary>
@@ -1476,7 +1563,10 @@ public partial class MainWindow : Window
         }
         _pendingUpdate = info;
         UpdateMsg.Text = $"Wisp {info.Version.ToString(3)} is ready to install. You have {Updater.Current.ToString(3)}.";
-        UpdatePopup.IsOpen = true;
+        // A detached WPF Popup opened while the window is inactive lands on the wrong monitor.
+        // For an automatic check, wait until the window is focused; a manual check opens now.
+        if (manual || IsActive) UpdatePopup.IsOpen = true;
+        else _showUpdateWhenActive = true;
     }
 
     private async void UpdateNow_Click(object sender, RoutedEventArgs e)
@@ -1502,7 +1592,7 @@ public partial class MainWindow : Window
     /// <summary>Detects installed Chromium browsers and imports the user's chosen data from one.</summary>
     private async Task StartImportAsync()
     {
-        if (_isPrivate) { ShowToast("Import isn't available in a private window"); return; }
+        if (_isPrivate) { ShowToast("Import isn't available in an incognito window"); return; }
 
         var browsers = ChromiumImport.DetectBrowsers();
         if (browsers.Count == 0) { ShowToast("No Chromium browser (Brave, Chrome, Edge, Vivaldi, Opera…) found to import from"); return; }
@@ -1781,7 +1871,7 @@ public partial class MainWindow : Window
 
     private void OpenPasswords()
     {
-        if (_isPrivate) { ShowToast("Passwords aren't available in a private window"); return; }
+        if (_isPrivate) { ShowToast("Passwords aren't available in an incognito window"); return; }
         new PasswordsWindow(this).Show();
     }
 
@@ -2243,10 +2333,12 @@ public partial class MainWindow : Window
             case "screenshot": MenuPopup.IsOpen = false; CaptureScreenshot(); break;
             case "installapp": MenuPopup.IsOpen = false; InstallAsApp(); break;
             case "cleardata": MenuPopup.IsOpen = false; ClearBrowsingData(); break;
+            case "newwindow": MenuPopup.IsOpen = false; OpenNewWindow(); break;
             case "private": MenuPopup.IsOpen = false; OpenPrivate(); break;
             case "settings": MenuPopup.IsOpen = false; OpenSettings(); break;
             case "forcedark": ToggleForceDark(); break;
             case "verticaltabs": ToggleVerticalTabs(); break;
+            case "bgtabs": ToggleOpenLinksInBackground(); break;
             case "search": CycleSearchEngine(); break;
             case "sleepnow": MenuPopup.IsOpen = false; await SleepNowAsync(); break;
             case "passwords": MenuPopup.IsOpen = false; OpenPasswords(); break;
@@ -2262,6 +2354,7 @@ public partial class MainWindow : Window
         BookmarkThisBtn.Content = marked ? "Remove bookmark" : "Bookmark this page";
         ForceDarkBtn.Content = "Force dark: " + (_settings.ForceDark ? "On" : "Off");
         VerticalTabsBtn.Content = "Vertical tabs: " + (_settings.VerticalTabs ? "On" : "Off");
+        OpenBgBtn.Content = "Open links in background: " + (_settings.OpenLinksInBackground ? "On" : "Off");
         SearchEngineBtn.Content = "Search: " + _settings.SearchEngine;
     }
 
@@ -2280,6 +2373,13 @@ public partial class MainWindow : Window
         _settings.Save();
         ApplyTabLayout();
         RelayoutTabs();
+        RefreshMenuLabels();
+    }
+
+    private void ToggleOpenLinksInBackground()
+    {
+        _settings.OpenLinksInBackground = !_settings.OpenLinksInBackground;
+        _settings.Save();
         RefreshMenuLabels();
     }
 
@@ -2421,6 +2521,7 @@ public partial class MainWindow : Window
         Add(Key.D0, ModifierKeys.Control, () => _tabs.ZoomReset());
         Add(Key.NumPad0, ModifierKeys.Control, () => _tabs.ZoomReset());
         Add(Key.B, ModifierKeys.Control | ModifierKeys.Shift, ToggleBookmarksBar);
+        Add(Key.N, ModifierKeys.Control, OpenNewWindow);
         Add(Key.N, ModifierKeys.Control | ModifierKeys.Shift, OpenPrivateWindow);
         Add(Key.F11, ModifierKeys.None, ToggleFullscreen);
         Add(Key.P, ModifierKeys.Control, PrintActive);
