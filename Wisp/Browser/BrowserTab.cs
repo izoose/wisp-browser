@@ -129,6 +129,10 @@ public class BrowserTab : INotifyPropertyChanged
     /// <summary>The live control, or null when the tab is discarded.</summary>
     public WebView2? View { get; set; }
 
+    /// <summary>Set by the injected link-click script when the last click on a link was a
+    /// middle-click or Ctrl+click, so the resulting NewWindowRequested opens in the background.</summary>
+    public DateTime BgHintUtc { get; set; }
+
     public event PropertyChangedEventHandler? PropertyChanged;
     private void OnChanged([CallerMemberName] string? name = null)
         => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));

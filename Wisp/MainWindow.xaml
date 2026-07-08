@@ -523,6 +523,7 @@
                     <Button Content="New private window" Tag="private" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
                     <Button Content="Clear browsing data…" Tag="cleardata" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
                     <Button x:Name="VerticalTabsBtn" Content="Vertical tabs" Tag="verticaltabs" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
+                    <Button x:Name="OpenBgBtn" Content="Open links in background" Tag="bgtabs" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
                     <Button x:Name="ForceDarkBtn" Content="Force dark on all sites" Tag="forcedark" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
                     <Button x:Name="SearchEngineBtn" Content="Search: Google" Tag="search" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
                     <Border Height="1" Background="{StaticResource EdgeBorderBrush}" Margin="4,6"/>

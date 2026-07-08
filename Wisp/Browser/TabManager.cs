@@ -375,14 +375,6 @@ public class TabManager
         return tab;
     }
 
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
-    private static extern short GetKeyState(int nVirtKey);
-
-    /// <summary>True when Ctrl or the middle mouse button is down — i.e. "open in the background".</summary>
-    private static bool OpenInBackground()
-        => (GetKeyState(0x11) & 0x8000) != 0   // VK_CONTROL
-        || (GetKeyState(0x04) & 0x8000) != 0;  // VK_MBUTTON
-
     /// <summary>Inserts a tab right after its opener (and after any siblings already opened from
     /// the same tab), skipping the pinned block so a normal tab never lands among pinned ones.</summary>
     private void InsertAdjacent(BrowserTab tab, BrowserTab? opener)
@@ -588,14 +580,19 @@ public class TabManager
             else
             {
                 e.Handled = true; // a plain new window / target=_blank / middle-click — open as a tab
-                // Foreground it on a normal click; keep it in the background for Ctrl/middle-click.
-                _ = OpenChildTabAsync(e.Uri, tab, OpenInBackground());
+                // Background it when the setting is on AND this was a middle/Ctrl click (hint fired within 1s);
+                // a plain left-click on a target=_blank link (no hint) still foregrounds.
+                bool bg = _settings.OpenLinksInBackground
+                          && (DateTime.UtcNow - tab.BgHintUtc) < TimeSpan.FromSeconds(1);
+                tab.BgHintUtc = DateTime.MinValue; // consume the hint
+                _ = OpenChildTabAsync(e.Uri, tab, bg);
             }
         };
         cw.WebMessageReceived += (_, e) =>
         {
             string? msg = null;
             try { msg = e.TryGetWebMessageAsString(); } catch { /* non-string message */ }
+            if (msg == "wisp:bgnext") { tab.BgHintUtc = DateTime.UtcNow; return; }
             if (msg is { } m && m.StartsWith("wisp:", StringComparison.Ordinal))
                 AcceleratorRequested?.Invoke(m.Substring(5));
         };
@@ -603,6 +600,7 @@ public class TabManager
         // Shortcuts must also work while web content has focus. The WPF wrapper doesn't
         // surface AcceleratorKeyPressed, so we capture the keys in-page and post them back.
         await cw.AddScriptToExecuteOnDocumentCreatedAsync(AcceleratorScript);
+        await cw.AddScriptToExecuteOnDocumentCreatedAsync(BgClickScript);
         // Adds an "Add to Wisp" button on Chrome Web Store detail pages.
         await cw.AddScriptToExecuteOnDocumentCreatedAsync(StoreButtonScript);
         // YouTube ads share the video's own domain, so the network blocker can't touch them —
@@ -726,6 +724,21 @@ public class TabManager
       else if (e.code === 'ArrowRight') cmd = 'forward';
     }
     if (cmd) { e.preventDefault(); e.stopPropagation(); window.chrome.webview.postMessage('wisp:' + cmd); }
+  }, true);
+})();";
+
+    /// <summary>Marks the next new-window request as a background open when the user middle-clicked
+    /// or Ctrl/Cmd-clicked a link. NewWindowRequested itself can't tell us the mouse button, and
+    /// GetKeyState is unreliable (the button is already released by the time it fires), so we detect
+    /// it in the page at mousedown and post a hint back.</summary>
+    private const string BgClickScript = @"
+(function () {
+  window.addEventListener('mousedown', function (e) {
+    if (!e.isTrusted) return;
+    var a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+    if (!a) return;
+    if (e.button === 1 || (e.button === 0 && (e.ctrlKey || e.metaKey)))
+      window.chrome.webview.postMessage('wisp:bgnext');
   }, true);
 })();";
 

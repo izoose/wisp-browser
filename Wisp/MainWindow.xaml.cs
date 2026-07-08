@@ -2259,6 +2259,7 @@ public partial class MainWindow : Window
             case "settings": MenuPopup.IsOpen = false; OpenSettings(); break;
             case "forcedark": ToggleForceDark(); break;
             case "verticaltabs": ToggleVerticalTabs(); break;
+            case "bgtabs": ToggleOpenLinksInBackground(); break;
             case "search": CycleSearchEngine(); break;
             case "sleepnow": MenuPopup.IsOpen = false; await SleepNowAsync(); break;
             case "passwords": MenuPopup.IsOpen = false; OpenPasswords(); break;
@@ -2274,6 +2275,7 @@ public partial class MainWindow : Window
         BookmarkThisBtn.Content = marked ? "Remove bookmark" : "Bookmark this page";
         ForceDarkBtn.Content = "Force dark: " + (_settings.ForceDark ? "On" : "Off");
         VerticalTabsBtn.Content = "Vertical tabs: " + (_settings.VerticalTabs ? "On" : "Off");
+        OpenBgBtn.Content = "Open links in background: " + (_settings.OpenLinksInBackground ? "On" : "Off");
         SearchEngineBtn.Content = "Search: " + _settings.SearchEngine;
     }
 
@@ -2292,6 +2294,13 @@ public partial class MainWindow : Window
         _settings.Save();
         ApplyTabLayout();
         RelayoutTabs();
+        RefreshMenuLabels();
+    }
+
+    private void ToggleOpenLinksInBackground()
+    {
+        _settings.OpenLinksInBackground = !_settings.OpenLinksInBackground;
+        _settings.Save();
         RefreshMenuLabels();
     }
 
