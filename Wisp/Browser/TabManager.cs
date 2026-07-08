@@ -388,6 +388,43 @@ public class TabManager
         return tab;
     }
 
+    /// <summary>Removes a tab from this window WITHOUT disposing its WebView2, so it can be adopted
+    /// by another window with its live page intact. Activates a neighbor if the active tab left.</summary>
+    public BrowserTab DetachTab(BrowserTab tab)
+    {
+        int idx = Tabs.IndexOf(tab);
+        BrowserTab? neighbor = null;
+        if (idx >= 0)
+        {
+            if (idx + 1 < Tabs.Count) neighbor = Tabs[idx + 1];
+            else if (idx - 1 >= 0) neighbor = Tabs[idx - 1];
+        }
+
+        if (tab.View != null) _host.Children.Remove(tab.View); // detach the control; do NOT dispose
+        Tabs.Remove(tab);
+
+        if (Active == tab)
+        {
+            Active = null;
+            if (neighbor != null) _ = ActivateAsync(neighbor);
+        }
+        return tab;
+    }
+
+    /// <summary>Takes ownership of a detached tab: hosts its existing WebView2 in this window and
+    /// activates it. The page keeps its live state (scroll/media/forms).</summary>
+    public async Task AdoptTab(BrowserTab tab)
+    {
+        tab.Owner = this;
+        if (tab.View != null)
+        {
+            tab.View.Visibility = Visibility.Collapsed;
+            if (!_host.Children.Contains(tab.View)) _host.Children.Add(tab.View);
+        }
+        Tabs.Add(tab);
+        await ActivateAsync(tab);
+    }
+
     /// <summary>Inserts a tab right after its opener (and after any siblings already opened from
     /// the same tab), skipping the pinned block so a normal tab never lands among pinned ones.</summary>
     private void InsertAdjacent(BrowserTab tab, BrowserTab? opener)

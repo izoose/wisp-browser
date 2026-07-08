@@ -425,7 +425,7 @@ public partial class MainWindow : Window
         _dragging = false;
     }
 
-    private void TabStrip_MouseMove(object sender, MouseEventArgs e)
+    private async void TabStrip_MouseMove(object sender, MouseEventArgs e)
     {
         if (_dragTab == null || e.LeftButton != MouseButtonState.Pressed) return;
         var pos = e.GetPosition(TabStrip);
@@ -435,9 +435,50 @@ public partial class MainWindow : Window
             _dragging = true;
             TabStrip.CaptureMouse();
         }
+
+        // Dragged well below the strip → tear the tab off into its own new window (like Chrome/Edge).
+        if (pos.Y > TabStrip.ActualHeight + 40)
+        {
+            var torn = _dragTab;
+            _dragTab = null;
+            _dragging = false;
+            TabStrip.ReleaseMouseCapture();
+            await TearOffAsync(torn);
+            return;
+        }
+
         var target = FindTabAt(pos);
         if (target != null && target != _dragTab)
             _tabs.MoveTab(_dragTab, _tabs.Tabs.IndexOf(target));
+    }
+
+    /// <summary>Moves a tab (live) into a new window positioned at the cursor. Closes this window
+    /// if the tab was its last one.</summary>
+    private async Task TearOffAsync(BrowserTab tab)
+    {
+        // Don't tear off the only tab of the only window — nothing would be left.
+        if (_tabs.Tabs.Count <= 1 && !App.Current.HasOpenWindows) return;
+
+        var w = App.Current.OpenBlankWindow();
+
+        // Position the new window at the cursor (convert physical pixels → DIPs for Left/Top).
+        try
+        {
+            GetCursorPos(out var pt);
+            var src = PresentationSource.FromVisual(this);
+            if (src?.CompositionTarget != null)
+            {
+                var dip = src.CompositionTarget.TransformFromDevice.Transform(new Point(pt.X, pt.Y));
+                w.Left = dip.X - 80;
+                w.Top = dip.Y - 12;
+            }
+        }
+        catch { }
+
+        var detached = _tabs.DetachTab(tab);
+        await w.AdoptTabAsync(detached);
+
+        if (_tabs.Tabs.Count == 0) Close();
     }
 
     private void TabStrip_MouseUp(object sender, MouseButtonEventArgs e)
@@ -1316,6 +1357,14 @@ public partial class MainWindow : Window
         try { App.Current.OpenNewWindow(); }
         catch (Exception ex) { ShowToast("Couldn't open a new window: " + ex.Message); }
     }
+
+    internal Task AdoptTabAsync(BrowserTab tab) => _tabs.AdoptTab(tab);
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct POINT { public int X; public int Y; }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out POINT p);
 
     private async void OpenPrivate()
     {
