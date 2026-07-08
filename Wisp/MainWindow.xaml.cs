@@ -92,6 +92,14 @@ public partial class MainWindow : Window
             if (WindowState == WindowState.Minimized) _ = _tabs.SuspendActiveAsync();
             else _tabs.ResumeActive();
         };
+        Activated += (_, _) =>
+        {
+            if (_showUpdateWhenActive && _pendingUpdate != null && !UpdatePopup.IsOpen)
+            {
+                _showUpdateWhenActive = false;
+                UpdatePopup.IsOpen = true;
+            }
+        };
         AddressBox.TextChanged += Address_TextChanged;
         ApplyBookmarksBar();
 
@@ -1461,6 +1469,7 @@ public partial class MainWindow : Window
     // ---- auto-update -----------------------------------------------------------------
 
     private Updater.UpdateInfo? _pendingUpdate;
+    private bool _showUpdateWhenActive;
 
     /// <summary>Checks GitHub for a newer release. On startup this is silent unless one is found;
     /// invoked from the menu it reports "up to date" too.</summary>
@@ -1476,7 +1485,10 @@ public partial class MainWindow : Window
         }
         _pendingUpdate = info;
         UpdateMsg.Text = $"Wisp {info.Version.ToString(3)} is ready to install. You have {Updater.Current.ToString(3)}.";
-        UpdatePopup.IsOpen = true;
+        // A detached WPF Popup opened while the window is inactive lands on the wrong monitor.
+        // For an automatic check, wait until the window is focused; a manual check opens now.
+        if (manual || IsActive) UpdatePopup.IsOpen = true;
+        else _showUpdateWhenActive = true;
     }
 
     private async void UpdateNow_Click(object sender, RoutedEventArgs e)
