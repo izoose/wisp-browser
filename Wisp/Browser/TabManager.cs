@@ -477,12 +477,23 @@ public class TabManager
             try
             {
                 var reqHost = new Uri(e.Request.Uri).Host;
-                if (AdBlockEngine.ShouldBlock(reqHost, pageHostCached))
+                if (!AdBlockEngine.ShouldBlock(reqHost, pageHostCached)) return;
+
+                // Never 204 the page the user is navigating to — many "trackers" (t.co,
+                // redirectingat.com, affiliate/link shorteners) double as functional redirects,
+                // so blocking the top-level navigation just breaks the click. We still block them
+                // as sub-resources (pixels/scripts/iframes). Sec-Fetch-Dest == "document" marks the
+                // main-frame navigation; iframes send "iframe", so ad iframes stay blocked.
+                if (e.ResourceContext == CoreWebView2WebResourceContext.Document)
                 {
-                    tab.BlockedCount++;
-                    AdBlockEngine.OnBlocked("");
-                    e.Response = _env.Core.CreateWebResourceResponse(null, 204, "No Content", "");
+                    var dest = e.Request.Headers.Contains("Sec-Fetch-Dest")
+                        ? e.Request.Headers.GetHeader("Sec-Fetch-Dest") : null;
+                    if (dest == null || dest == "document") return;
                 }
+
+                tab.BlockedCount++;
+                AdBlockEngine.OnBlocked("");
+                e.Response = _env.Core.CreateWebResourceResponse(null, 204, "No Content", "");
             }
             catch { }
         };
