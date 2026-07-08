@@ -80,6 +80,7 @@ public partial class MainWindow : Window
         _audioNameTimer.Start();
 
         RegisterShortcuts();
+        ApplyTabLayout(); // horizontal (default) or vertical sidebar per the saved setting
         PreviewKeyDown += (_, e) =>
         {
             if (e.Key == Key.Escape && _isFullscreen) { e.Handled = true; SetFullscreen(false); }
@@ -2245,6 +2246,7 @@ public partial class MainWindow : Window
             case "private": MenuPopup.IsOpen = false; OpenPrivate(); break;
             case "settings": MenuPopup.IsOpen = false; OpenSettings(); break;
             case "forcedark": ToggleForceDark(); break;
+            case "verticaltabs": ToggleVerticalTabs(); break;
             case "search": CycleSearchEngine(); break;
             case "sleepnow": MenuPopup.IsOpen = false; await SleepNowAsync(); break;
             case "passwords": MenuPopup.IsOpen = false; OpenPasswords(); break;
@@ -2259,7 +2261,26 @@ public partial class MainWindow : Window
         bool marked = _tabs.Active != null && _bookmarks.Contains(_tabs.Active.Url);
         BookmarkThisBtn.Content = marked ? "Remove bookmark" : "Bookmark this page";
         ForceDarkBtn.Content = "Force dark: " + (_settings.ForceDark ? "On" : "Off");
+        VerticalTabsBtn.Content = "Vertical tabs: " + (_settings.VerticalTabs ? "On" : "Off");
         SearchEngineBtn.Content = "Search: " + _settings.SearchEngine;
+    }
+
+    /// <summary>Shows tabs in the left sidebar or the top strip based on the setting.</summary>
+    private void ApplyTabLayout()
+    {
+        bool vertical = _settings.VerticalTabs || Environment.GetEnvironmentVariable("WISP_VERTICAL_TABS") == "1";
+        VerticalTabsPanel.Visibility = vertical ? Visibility.Visible : Visibility.Collapsed;
+        TabScroller.Visibility = vertical ? Visibility.Collapsed : Visibility.Visible;
+        NewTabBtn.Visibility = vertical ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void ToggleVerticalTabs()
+    {
+        _settings.VerticalTabs = !_settings.VerticalTabs;
+        _settings.Save();
+        ApplyTabLayout();
+        RelayoutTabs();
+        RefreshMenuLabels();
     }
 
     private void ToggleForceDark()

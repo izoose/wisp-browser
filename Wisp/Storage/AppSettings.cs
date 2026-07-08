@@ -53,6 +53,9 @@ public class AppSettings
 
     public bool BookmarksBarVisible { get; set; }
 
+    /// <summary>Show tabs in a left sidebar instead of the top strip.</summary>
+    public bool VerticalTabs { get; set; }
+
     /// <summary>When true, opening a new tab puts the cursor in the address bar instead of the
     /// new-tab page's search box.</summary>
     public bool FocusAddressOnNewTab { get; set; }

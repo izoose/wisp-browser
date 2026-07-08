@@ -13,6 +13,10 @@
                       GlassFrameThickness="0" UseAeroCaptionButtons="False"/>
     </WindowChrome.WindowChrome>
     <Grid x:Name="RootGrid">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto"/>  <!-- vertical-tabs sidebar (0 wide when off) -->
+            <ColumnDefinition Width="*"/>     <!-- everything else -->
+        </Grid.ColumnDefinitions>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>  <!-- title bar + tabs -->
             <RowDefinition Height="Auto"/>  <!-- toolbar -->
@@ -20,8 +24,91 @@
             <RowDefinition Height="*"/>     <!-- content -->
         </Grid.RowDefinitions>
 
+        <!-- Vertical tabs sidebar (opt-in; hidden by default so the top strip is used) -->
+        <Border x:Name="VerticalTabsPanel" Grid.Column="0" Grid.RowSpan="4" Width="212" Visibility="Collapsed"
+                Background="{StaticResource ChromeBrush}" BorderBrush="{StaticResource EdgeBorderBrush}" BorderThickness="0,0,1,0">
+            <DockPanel Margin="6,6,6,6">
+                <Button x:Name="VNewTabBtn" DockPanel.Dock="Top" Content="+  New tab" Click="NewTab_Click"
+                        Style="{StaticResource MenuButtonStyle}" HorizontalContentAlignment="Left"
+                        Margin="0,0,0,6" ToolTip="New tab (Ctrl+T)"/>
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <ItemsControl ItemsSource="{Binding Tabs}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border x:Name="VTabRoot" Margin="0,1" CornerRadius="7" Background="{StaticResource TabInactiveBrush}"
+                                        MouseEnter="Tab_HoverEnter" MouseLeave="Tab_HoverLeave">
+                                    <Border.ContextMenu>
+                                        <ContextMenu Style="{StaticResource DarkContextMenu}">
+                                            <ContextMenu.Resources>
+                                                <Style TargetType="MenuItem" BasedOn="{StaticResource DarkMenuItem}"/>
+                                                <Style TargetType="Separator" BasedOn="{StaticResource DarkSeparator}"/>
+                                            </ContextMenu.Resources>
+                                            <MenuItem Header="New tab" Click="Ctx_NewTab"/>
+                                            <MenuItem Header="Duplicate tab" Click="Ctx_Duplicate"/>
+                                            <MenuItem Header="Pin / Unpin tab" Click="Ctx_Pin"/>
+                                            <MenuItem Header="Mute / Unmute tab" Click="Ctx_Mute"/>
+                                            <MenuItem Header="Keep tab awake" Click="Ctx_KeepAwake"
+                                                      IsCheckable="True" IsChecked="{Binding NeverSleep, Mode=OneWay}"/>
+                                            <MenuItem Header="Add tab to group">
+                                                <MenuItem Header="Blue"   Tag="#4C8DFF" Click="Ctx_Group"/>
+                                                <MenuItem Header="Red"    Tag="#F2555A" Click="Ctx_Group"/>
+                                                <MenuItem Header="Green"  Tag="#3FB950" Click="Ctx_Group"/>
+                                                <MenuItem Header="Yellow" Tag="#E3B341" Click="Ctx_Group"/>
+                                                <MenuItem Header="Purple" Tag="#A371F7" Click="Ctx_Group"/>
+                                                <MenuItem Header="Remove from group" Tag="" Click="Ctx_Group"/>
+                                            </MenuItem>
+                                            <Border Height="1" Background="{StaticResource EdgeBorderBrush}" Margin="8,5"/>
+                                            <MenuItem Header="Close tab" Click="Ctx_Close"/>
+                                        </ContextMenu>
+                                    </Border.ContextMenu>
+                                    <Grid Height="34">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="4"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <!-- group color strip on the left -->
+                                        <Border Grid.Column="0" Width="4" CornerRadius="2" Margin="0,6"
+                                                Background="{Binding GroupBrush}"
+                                                Visibility="{Binding HasGroup, Converter={StaticResource BoolToVis}}"/>
+                                        <Image Grid.Column="1" Source="{Binding Favicon}" Width="16" Height="16"
+                                               Margin="8,0,8,0" VerticalAlignment="Center" Stretch="Uniform">
+                                            <Image.Style>
+                                                <Style TargetType="Image">
+                                                    <Style.Triggers>
+                                                        <Trigger Property="Source" Value="{x:Null}">
+                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                        </Trigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Image.Style>
+                                        </Image>
+                                        <Button Grid.Column="2" ToolTip="{Binding Url}" Click="Tab_Click"
+                                                Style="{StaticResource TabButtonStyle}" HorizontalContentAlignment="Left">
+                                            <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis"
+                                                       VerticalAlignment="Center" FontSize="12"
+                                                       Foreground="{StaticResource TextBrush}"/>
+                                        </Button>
+                                        <Button Grid.Column="3" Content="&#xE711;" Click="TabClose_Click"
+                                                ToolTip="Close tab (Ctrl+W)" Style="{StaticResource TabCloseStyle}"
+                                                Margin="0,0,4,0"/>
+                                    </Grid>
+                                </Border>
+                                <DataTemplate.Triggers>
+                                    <DataTrigger Binding="{Binding IsActive}" Value="True">
+                                        <Setter TargetName="VTabRoot" Property="Background" Value="{StaticResource TabActiveBrush}"/>
+                                    </DataTrigger>
+                                </DataTemplate.Triggers>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </DockPanel>
+        </Border>
+
         <!-- Title bar: tabs live here (drag the empty area to move the window) -->
-        <Grid x:Name="TitleTabBar" Grid.Row="0" Background="{StaticResource ChromeBrush}" Height="40"
+        <Grid x:Name="TitleTabBar" Grid.Column="1" Grid.Row="0" Background="{StaticResource ChromeBrush}" Height="40"
               SizeChanged="TabScroller_SizeChanged">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>  <!-- tab scroller (width-capped so tabs shrink) -->
@@ -149,7 +236,7 @@
             </Grid>
 
         <!-- Toolbar -->
-        <Border x:Name="ToolbarRow" Grid.Row="1" Background="{StaticResource ChromeBrush}" Padding="6,4">
+        <Border x:Name="ToolbarRow" Grid.Column="1" Grid.Row="1" Background="{StaticResource ChromeBrush}" Padding="6,4">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
@@ -210,7 +297,7 @@
         </Border>
 
         <!-- Bookmarks bar (toggle with Ctrl+Shift+B) -->
-        <Border x:Name="BookmarksBar" Grid.Row="2" Background="{StaticResource ChromeBrush}" Padding="6,2"
+        <Border x:Name="BookmarksBar" Grid.Column="1" Grid.Row="2" Background="{StaticResource ChromeBrush}" Padding="6,2"
                 Visibility="Collapsed" BorderBrush="{StaticResource EdgeBorderBrush}" BorderThickness="0,1,0,0">
             <ItemsControl x:Name="BookmarksBarItems">
                 <ItemsControl.ItemsPanel>
@@ -220,7 +307,7 @@
         </Border>
 
         <!-- Web content host + docked extension side panel -->
-        <Grid Grid.Row="3">
+        <Grid Grid.Column="1" Grid.Row="3">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
@@ -435,6 +522,7 @@
                     <Border Height="1" Background="{StaticResource EdgeBorderBrush}" Margin="4,6"/>
                     <Button Content="New private window" Tag="private" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
                     <Button Content="Clear browsing data…" Tag="cleardata" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
+                    <Button x:Name="VerticalTabsBtn" Content="Vertical tabs" Tag="verticaltabs" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
                     <Button x:Name="ForceDarkBtn" Content="Force dark on all sites" Tag="forcedark" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
                     <Button x:Name="SearchEngineBtn" Content="Search: Google" Tag="search" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
                     <Border Height="1" Background="{StaticResource EdgeBorderBrush}" Margin="4,6"/>
