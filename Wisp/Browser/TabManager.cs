@@ -50,6 +50,16 @@ public class TabManager
     /// <summary>Raised when a page calls alert()/confirm()/prompt() so we can show a Wisp-styled dialog.</summary>
     public event Action<CoreWebView2ScriptDialogOpeningEventArgs>? ScriptDialogRequested;
 
+    /// <summary>The window currently hosting this manager's tabs (resolved from the host panel).</summary>
+    public Window? OwnerWindow => Window.GetWindow(_host);
+
+    // Event re-raisers so a tab's handlers can fire events on its CURRENT owner after being moved.
+    public void RaiseActiveTabUpdated() => ActiveTabUpdated?.Invoke();
+    public void RaisePageVisited(string url, string title) => PageVisited?.Invoke(url, title);
+    public void RaiseDownloadStarted(CoreWebView2DownloadOperation op) => DownloadStarted?.Invoke(op);
+    public void RaiseFullScreenChanged(bool on) => FullScreenChanged?.Invoke(on);
+    public void RaiseAccelerator(string cmd) => AcceleratorRequested?.Invoke(cmd);
+
     /// <summary>Recently-closed tabs, for Ctrl+Shift+T. Newest last.</summary>
     private readonly List<SessionTab> _closed = new();
     public bool HasClosedTabs => _closed.Count > 0;
@@ -64,6 +74,7 @@ public class TabManager
     public async Task<BrowserTab> NewTabAsync(string url, bool activate)
     {
         var tab = new BrowserTab { Url = url, Title = "New Tab", State = TabState.Discarded };
+        tab.Owner = this;
         Tabs.Add(tab);
         if (activate)
             await ActivateAsync(tab);
@@ -82,6 +93,7 @@ public class TabManager
             NeverSleep = neverSleep,
             GroupColor = groupColor,
         };
+        tab.Owner = this;
         Tabs.Add(tab);
         return tab;
     }
@@ -366,6 +378,7 @@ public class TabManager
     public async Task<BrowserTab> OpenChildTabAsync(string url, BrowserTab opener, bool background = false)
     {
         var tab = new BrowserTab { Url = url, Title = "New Tab", State = TabState.Background, Opener = opener };
+        tab.Owner = this;
         InsertAdjacent(tab, opener);
         await EnsureViewAsync(tab);
         tab.LastActiveUtc = DateTime.UtcNow;
@@ -392,6 +405,7 @@ public class TabManager
 
     private async Task EnsureViewAsync(BrowserTab tab)
     {
+        tab.Owner = this;
         if (tab.View != null) return;
 
         var view = new WebView2 { Visibility = Visibility.Collapsed };
@@ -435,7 +449,7 @@ public class TabManager
         // Web-initiated fullscreen (e.g. a YouTube video's fullscreen button).
         cw.ContainsFullScreenElementChanged += (_, _) =>
         {
-            if (tab == Active) FullScreenChanged?.Invoke(cw.ContainsFullScreenElement);
+            if (tab == tab.Owner?.Active) tab.Owner?.RaiseFullScreenChanged(cw.ContainsFullScreenElement);
         };
 
         // Add "Search <engine> for …" to the right-click menu (WebView2's default menu has no
@@ -450,7 +464,7 @@ public class TabManager
                 var label = sel.Length > 32 ? sel.Substring(0, 32).TrimEnd() + "…" : sel;
                 var search = _env.Core.CreateContextMenuItem(
                     $"Search {_settings.SearchEngine} for “{label}”", null, CoreWebView2ContextMenuItemKind.Command);
-                search.CustomItemSelected += (_, _) => _ = NewTabAsync(_settings.BuildSearchUrl(sel), true);
+                search.CustomItemSelected += (_, _) => _ = (tab.Owner ?? this).NewTabAsync(_settings.BuildSearchUrl(sel), true);
                 e.MenuItems.Insert(0, search);
                 e.MenuItems.Insert(1, _env.Core.CreateContextMenuItem("", null, CoreWebView2ContextMenuItemKind.Separator));
             }
@@ -512,7 +526,7 @@ public class TabManager
                 try
                 {
                     string host; try { host = new Uri(e.Uri).Host; } catch { host = origin; }
-                    var owner = Window.GetWindow(_host);
+                    var owner = tab.Owner?.OwnerWindow ?? Window.GetWindow(_host);
                     bool allow = owner != null && PromptDialog.AllowBlock(owner, host, $"{host} wants to {what}.");
                     _settings.SitePermissions[key] = allow;
                     _settings.Save();
@@ -530,7 +544,7 @@ public class TabManager
         cw.DownloadStarting += (_, e) =>
         {
             e.Handled = true; // suppress the default download bar; we show our own panel
-            DownloadStarted?.Invoke(e.DownloadOperation);
+            (tab.Owner ?? this).RaiseDownloadStarted(e.DownloadOperation);
         };
 
         await AdBlock.EnsureRemovedAsync(cw, _settings); // uninstall the old bundled uBO Lite, once
@@ -538,8 +552,8 @@ public class TabManager
         cw.DocumentTitleChanged += (_, _) =>
         {
             tab.Title = string.IsNullOrWhiteSpace(cw.DocumentTitle) ? HostOf(cw.Source) : cw.DocumentTitle;
-            PageVisited?.Invoke(cw.Source, cw.DocumentTitle);
-            if (tab == Active) ActiveTabUpdated?.Invoke();
+            tab.Owner?.RaisePageVisited(cw.Source, cw.DocumentTitle);
+            if (tab == tab.Owner?.Active) tab.Owner?.RaiseActiveTabUpdated();
         };
         cw.SourceChanged += (_, _) =>
         {
@@ -547,12 +561,12 @@ public class TabManager
             tab.AddressDraft = null; // navigated — the typed draft is stale
             tab.Url = cw.Source;
             pageHostCached = HostOf(cw.Source); // refresh the ad-block allowlist host for this page
-            PageVisited?.Invoke(cw.Source, tab.Title);
-            if (tab == Active) ActiveTabUpdated?.Invoke();
+            tab.Owner?.RaisePageVisited(cw.Source, tab.Title);
+            if (tab == tab.Owner?.Active) tab.Owner?.RaiseActiveTabUpdated();
         };
         cw.HistoryChanged += (_, _) =>
         {
-            if (tab == Active) ActiveTabUpdated?.Invoke();
+            if (tab == tab.Owner?.Active) tab.Owner?.RaiseActiveTabUpdated();
         };
         cw.NavigationCompleted += (_, e) =>
         {
@@ -585,7 +599,7 @@ public class TabManager
                 bool bg = _settings.OpenLinksInBackground
                           && (DateTime.UtcNow - tab.BgHintUtc) < TimeSpan.FromSeconds(1);
                 tab.BgHintUtc = DateTime.MinValue; // consume the hint
-                _ = OpenChildTabAsync(e.Uri, tab, bg);
+                _ = (tab.Owner ?? this).OpenChildTabAsync(e.Uri, tab, bg);
             }
         };
         cw.WebMessageReceived += (_, e) =>
@@ -595,7 +609,7 @@ public class TabManager
             if (msg == "wisp:bgnext") { tab.BgHintUtc = DateTime.UtcNow; return; }
             if (msg == "wisp:bgclear") { tab.BgHintUtc = DateTime.MinValue; return; }
             if (msg is { } m && m.StartsWith("wisp:", StringComparison.Ordinal))
-                AcceleratorRequested?.Invoke(m.Substring(5));
+                (tab.Owner ?? this).RaiseAccelerator(m.Substring(5));
         };
 
         // Shortcuts must also work while web content has focus. The WPF wrapper doesn't
