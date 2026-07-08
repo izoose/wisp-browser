@@ -79,7 +79,7 @@ public partial class MainWindow : Window
         _audioNameTimer.Tick += (_, _) =>
         {
             if (_tabs.Tabs.Any(t => t.IsPlayingAudio))
-                AudioSessionNaming.Apply(_isPrivate ? "Wisp (Private)" : "Wisp", (Environment.ProcessPath ?? "") + ",0");
+                AudioSessionNaming.Apply(_isPrivate ? "Wisp (Incognito)" : "Wisp", (Environment.ProcessPath ?? "") + ",0");
         };
         _audioNameTimer.Start();
 
@@ -1374,7 +1374,7 @@ public partial class MainWindow : Window
             var w = new MainWindow(env, _settings, isPrivate: true, privateUdf: udf);
             w.Show();
         }
-        catch (Exception ex) { ShowToast("Couldn't open private window: " + ex.Message); }
+        catch (Exception ex) { ShowToast("Couldn't open incognito window: " + ex.Message); }
     }
 
     private async void OpenReader()
@@ -1592,7 +1592,7 @@ public partial class MainWindow : Window
     /// <summary>Detects installed Chromium browsers and imports the user's chosen data from one.</summary>
     private async Task StartImportAsync()
     {
-        if (_isPrivate) { ShowToast("Import isn't available in a private window"); return; }
+        if (_isPrivate) { ShowToast("Import isn't available in an incognito window"); return; }
 
         var browsers = ChromiumImport.DetectBrowsers();
         if (browsers.Count == 0) { ShowToast("No Chromium browser (Brave, Chrome, Edge, Vivaldi, Opera…) found to import from"); return; }
@@ -1871,7 +1871,7 @@ public partial class MainWindow : Window
 
     private void OpenPasswords()
     {
-        if (_isPrivate) { ShowToast("Passwords aren't available in a private window"); return; }
+        if (_isPrivate) { ShowToast("Passwords aren't available in an incognito window"); return; }
         new PasswordsWindow(this).Show();
     }
 
