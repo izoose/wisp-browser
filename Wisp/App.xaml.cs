@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.IO.Pipes;
 using System.Threading;
@@ -24,6 +25,49 @@ public partial class App : Application
 
     private Mutex? _mutex;
     private MainWindow? _main;
+
+    private readonly List<MainWindow> _windows = new();      // open NORMAL windows (not incognito)
+    public MainWindow? FrontWindow { get; private set; }      // most-recently-activated normal window
+    public bool HasOpenWindows => _windows.Count > 0;
+
+    public void RegisterWindow(MainWindow w)
+    {
+        if (!_windows.Contains(w)) _windows.Add(w);
+        FrontWindow = w;
+    }
+
+    public void UnregisterWindow(MainWindow w)
+    {
+        _windows.Remove(w);
+        if (FrontWindow == w) FrontWindow = _windows.Count > 0 ? _windows[^1] : null;
+    }
+
+    public void SetFront(MainWindow w) => FrontWindow = w;
+
+    public MainWindow OpenNewWindow()
+    {
+        var w = new MainWindow(Browser, Settings);
+        w.Show();
+        return w;
+    }
+
+    public MainWindow OpenBlankWindow()
+    {
+        var w = new MainWindow(Browser, Settings, blankForAdopt: true);
+        w.Show();
+        return w;
+    }
+
+    /// <summary>Persists the union of all open normal windows' tabs, so a second window never
+    /// clobbers the first's session. Restore still loads into a single window.</summary>
+    public void SaveSession()
+    {
+        if (_windows.Count == 0) return;
+        var combined = new SessionData { ActiveIndex = 0 };
+        foreach (var win in _windows)
+            combined.Tabs.AddRange(win.SnapshotSession().Tabs);
+        SessionStore.Save(combined);
+    }
 
     [System.Runtime.InteropServices.DllImport("shell32.dll")]
     private static extern int SetCurrentProcessExplicitAppUserModelID(
@@ -61,7 +105,7 @@ public partial class App : Application
             return;
         }
 
-        ShutdownMode = ShutdownMode.OnMainWindowClose;
+        ShutdownMode = ShutdownMode.OnLastWindowClose;
         AppPaths.EnsureDataDir();
         Settings = AppSettings.Load();
         try { DefaultBrowser.Register(); } catch { }
@@ -161,8 +205,9 @@ public partial class App : Application
                     var url = await r.ReadLineAsync();
                     Dispatcher.Invoke(() =>
                     {
-                        if (!string.IsNullOrWhiteSpace(url)) _main?.OpenUrlExternally(url);
-                        else _main?.BringToForeground();
+                        var target = FrontWindow ?? _main;
+                        if (!string.IsNullOrWhiteSpace(url)) target?.OpenUrlExternally(url);
+                        else target?.BringToForeground();
                     });
                 }
                 catch { await Task.Delay(500); }

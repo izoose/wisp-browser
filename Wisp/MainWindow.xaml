@@ -528,6 +528,7 @@
                     <Button Content="Take screenshot" Tag="screenshot" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
                     <Button Content="Install this site as an app" Tag="installapp" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
                     <Border Height="1" Background="{StaticResource EdgeBorderBrush}" Margin="4,6"/>
+                    <Button Content="New window" Tag="newwindow" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
                     <Button Content="New incognito window" Tag="private" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
                     <Button Content="Clear browsing data…" Tag="cleardata" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>
                     <Button x:Name="VerticalTabsBtn" Content="Vertical tabs" Tag="verticaltabs" Click="Menu_Action" Style="{StaticResource MenuButtonStyle}"/>

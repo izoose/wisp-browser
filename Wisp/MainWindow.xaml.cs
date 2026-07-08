@@ -34,6 +34,7 @@ public partial class MainWindow : Window
     private readonly bool _isPrivate;
     private readonly string? _privateUdf;
     private readonly string? _startupUrl;
+    private readonly bool _blankForAdopt;
     private readonly DispatcherTimer _sessionTimer;
     private readonly DispatcherTimer _audioNameTimer;
     private DispatcherTimer? _toastTimer;
@@ -41,7 +42,7 @@ public partial class MainWindow : Window
 
     private static readonly string[] Engines = { "Google", "DuckDuckGo", "Brave Search", "Bing" };
 
-    public MainWindow(BrowserEnvironment env, AppSettings settings, bool isPrivate = false, string? privateUdf = null, string? startupUrl = null)
+    public MainWindow(BrowserEnvironment env, AppSettings settings, bool isPrivate = false, string? privateUdf = null, string? startupUrl = null, bool blankForAdopt = false)
     {
         InitializeComponent();
         _env = env;
@@ -49,6 +50,7 @@ public partial class MainWindow : Window
         _isPrivate = isPrivate;
         _privateUdf = privateUdf;
         _startupUrl = startupUrl;
+        _blankForAdopt = blankForAdopt;
         _history = isPrivate ? new History() : History.Load(); // never read on-disk history in private mode
         AdBlockEngine.Enabled = settings.AdBlockEnabled;
         AdBlockEngine.SetAllowedHosts(settings.AdBlockAllowedHosts);
@@ -68,7 +70,7 @@ public partial class MainWindow : Window
         DownloadsList.ItemsSource = _downloads;
 
         _sessionTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(4) };
-        _sessionTimer.Tick += (_, _) => { _sessionTimer.Stop(); if (!_isPrivate) SessionStore.Save(_tabs.Snapshot()); };
+        _sessionTimer.Tick += (_, _) => { _sessionTimer.Stop(); if (!_isPrivate) App.Current.SaveSession(); };
 
         // Show up as "Wisp" (not "Microsoft Edge WebView2") in the Windows Volume Mixer.
         _audioNameTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2.5) };
@@ -94,6 +96,7 @@ public partial class MainWindow : Window
         };
         Activated += (_, _) =>
         {
+            if (!_isPrivate) App.Current.SetFront(this);
             if (_showUpdateWhenActive && _pendingUpdate != null && !UpdatePopup.IsOpen)
             {
                 _showUpdateWhenActive = false;
@@ -112,9 +115,13 @@ public partial class MainWindow : Window
 
         Loaded += async (_, _) =>
         {
-            await RestoreOrOpenHomeAsync();
-            if (!string.IsNullOrWhiteSpace(_startupUrl))
-                await _tabs.NewTabAsync(_startupUrl, true); // opened from a link/file (default browser)
+            if (!_isPrivate) App.Current.RegisterWindow(this);
+            if (!_blankForAdopt)
+            {
+                await RestoreOrOpenHomeAsync();
+                if (!string.IsNullOrWhiteSpace(_startupUrl))
+                    await _tabs.NewTabAsync(_startupUrl, true); // opened from a link/file (default browser)
+            }
             _tabs.Active?.View?.Focus();
             await RefreshExtensionsAsync();
 
@@ -184,7 +191,9 @@ public partial class MainWindow : Window
                 try { if (_privateUdf != null && System.IO.Directory.Exists(_privateUdf)) System.IO.Directory.Delete(_privateUdf, true); } catch { }
                 return;
             }
-            SessionStore.Save(_tabs.Snapshot());
+            App.Current.UnregisterWindow(this);
+            if (App.Current.HasOpenWindows) App.Current.SaveSession(); // union of remaining windows
+            else SessionStore.Save(_tabs.Snapshot());                  // last window: preserve its tabs
             _settings.Save();
             _history.Save();
         };
@@ -196,6 +205,8 @@ public partial class MainWindow : Window
         _sessionTimer.Stop();
         _sessionTimer.Start();
     }
+
+    internal SessionData SnapshotSession() => _tabs.Snapshot();
 
     private void TabScroller_SizeChanged(object sender, SizeChangedEventArgs e) => RelayoutTabs();
 
@@ -1289,6 +1300,8 @@ public partial class MainWindow : Window
 
     partial void OnOpenPrivateWindow() => OpenPrivate();
 
+    private void OpenNewWindow() => App.Current.OpenNewWindow();
+
     private async void OpenPrivate()
     {
         try
@@ -2256,6 +2269,7 @@ public partial class MainWindow : Window
             case "screenshot": MenuPopup.IsOpen = false; CaptureScreenshot(); break;
             case "installapp": MenuPopup.IsOpen = false; InstallAsApp(); break;
             case "cleardata": MenuPopup.IsOpen = false; ClearBrowsingData(); break;
+            case "newwindow": MenuPopup.IsOpen = false; OpenNewWindow(); break;
             case "private": MenuPopup.IsOpen = false; OpenPrivate(); break;
             case "settings": MenuPopup.IsOpen = false; OpenSettings(); break;
             case "forcedark": ToggleForceDark(); break;
@@ -2443,6 +2457,7 @@ public partial class MainWindow : Window
         Add(Key.D0, ModifierKeys.Control, () => _tabs.ZoomReset());
         Add(Key.NumPad0, ModifierKeys.Control, () => _tabs.ZoomReset());
         Add(Key.B, ModifierKeys.Control | ModifierKeys.Shift, ToggleBookmarksBar);
+        Add(Key.N, ModifierKeys.Control, OpenNewWindow);
         Add(Key.N, ModifierKeys.Control | ModifierKeys.Shift, OpenPrivateWindow);
         Add(Key.F11, ModifierKeys.None, ToggleFullscreen);
         Add(Key.P, ModifierKeys.Control, PrintActive);
