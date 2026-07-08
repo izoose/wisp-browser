@@ -593,6 +593,7 @@ public class TabManager
             string? msg = null;
             try { msg = e.TryGetWebMessageAsString(); } catch { /* non-string message */ }
             if (msg == "wisp:bgnext") { tab.BgHintUtc = DateTime.UtcNow; return; }
+            if (msg == "wisp:bgclear") { tab.BgHintUtc = DateTime.MinValue; return; }
             if (msg is { } m && m.StartsWith("wisp:", StringComparison.Ordinal))
                 AcceleratorRequested?.Invoke(m.Substring(5));
         };
@@ -739,6 +740,8 @@ public class TabManager
     if (!a) return;
     if (e.button === 1 || (e.button === 0 && (e.ctrlKey || e.metaKey)))
       window.chrome.webview.postMessage('wisp:bgnext');
+    else if (e.button === 0)
+      window.chrome.webview.postMessage('wisp:bgclear');
   }, true);
 })();";
 
